@@ -28,6 +28,15 @@ Integrate Supabase Postgres as primary database (replacing MongoDB). Add `govern
 - Renamed app to "عقاراتي" in header, auth page, and browser title
 - Backend tests: 17/17 pass (JWT auth, property CRUD, location filter, admin stats, subscription plans)
 
+## Iteration 2 (2026-07-01)
+- Moved "Made with Emergent" watermark to **top-right corner** (`top:16px; right:16px`) so it never overlaps buttons/inputs
+- **Data isolation between offices/agents**:
+  - `GET /api/properties`, `/properties/search`, `/properties/{id}` now require authentication
+  - Non-admin agents see ONLY their own properties (filter `agent_id == current_user.id`)
+  - Cross-agent GET/PUT/DELETE returns 403
+  - Admin role bypasses all scoping and sees ALL properties from all agents
+- Backend tests: 25/25 pass (100%) — full regression + isolation coverage
+
 ## Test Credentials
 - Admin: admin@aqari.com / admin123 (see /app/memory/test_credentials.md)
 
