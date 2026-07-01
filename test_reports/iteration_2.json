@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 2: Backend data-isolation + regression suite. 25/25 pytest cases pass (100%). Verified: GET /api/properties, /api/properties/search, /api/properties/{id} now require auth (401 without cookie); non-admin agents see ONLY their own properties in list/get/search even with matching governorate filters; admin sees ALL agents' properties; cross-agent GET/PUT/DELETE returns 403; owner GET own works; admin GET any works. Regression preserved: auth login/register/me, subscriptions plans/create/list, property CRUD, admin stats, location filtering.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Data-isolation is enforced inline in each endpoint via `if current_user.role != 'admin': conds.append(Property.agent_id == current_user.id)`. Consider extracting into a reusable `apply_agent_scope(stmt, user)` helper to prevent future endpoints from forgetting the filter (single point of enforcement).",
+    "get_property returns 403 for cross-agent access, which discloses the property's existence. Consider returning 404 instead of 403 to avoid information leakage about whether a property ID exists in another agent's inventory.",
+    "PropertyCreate is reused as PUT payload; there is no partial-update model. Any missing field silently resets. Consider a separate PropertyUpdate with Optional fields.",
+    "seed_admin overwrites /app/memory/test_credentials.md on every startup, which is fine for dev but should be gated behind an env flag for prod deployments.",
+    "No unique index/constraint on (properties.agent_id) FK to users.id; if an agent is deleted, orphan properties are still returned to admin. Add FK with ON DELETE cascade or soft-delete."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25)",
+    "frontend": "not tested (out of scope)"
+  },
+  "test_credentials": "admin@aqari.com / admin123 (and fresh TEST_agentA_*/TEST_agentB_* registered per session)",
+  "seed_data_creation": "Session-scoped fixtures register two fresh agents (TEST_agentA_* and TEST_agentB_*) with unique uuid-suffixed emails and offices. All test properties are deleted at end of each test; residual TEST_ users/offices remain (harmless, uuid-unique per run).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "GET /api/properties, /api/properties/search, /api/properties/{id} NOW REQUIRE auth cookie/Bearer. Non-admin filter agent_id == current_user.id inlined in server.py. Watermark relocation was NOT tested here (backend-only scope). Base URL: https://aqarati-feature.preview.emergentagent.com. Run: cd /app/backend && REACT_APP_BACKEND_URL=... python -m pytest tests/backend_test.py -v.",
+  "rca of the issue": "N/A - all data-isolation requirements verified end-to-end. No regressions detected."
+}

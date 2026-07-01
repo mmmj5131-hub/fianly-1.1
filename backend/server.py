@@ -399,9 +399,13 @@ async def get_properties(skip: int = 0, limit: int = 50,
                          status: Optional[str] = None,
                          governorate: Optional[str] = None,
                          district: Optional[str] = None,
+                         current_user: User = Depends(get_current_user),
                          db: AsyncSession = Depends(get_db)):
     stmt = select(Property)
     conds = []
+    # Data isolation: non-admin agents see only their own properties
+    if current_user.role != "admin":
+        conds.append(Property.agent_id == current_user.id)
     if status:
         conds.append(Property.status == status)
     if governorate:
@@ -426,9 +430,13 @@ async def search_properties(
     status: Optional[str] = None,
     governorate: Optional[str] = None,
     district: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     conds = []
+    # Data isolation: non-admin agents see only their own properties
+    if current_user.role != "admin":
+        conds.append(Property.agent_id == current_user.id)
     if min_price is not None:
         conds.append(Property.price >= min_price)
     if max_price is not None:
@@ -455,11 +463,16 @@ async def search_properties(
 
 
 @api_router.get("/properties/{property_id}", response_model=PropertyResponse)
-async def get_property(property_id: str, db: AsyncSession = Depends(get_db)):
+async def get_property(property_id: str,
+                       current_user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Property).where(Property.id == property_id))
     prop = result.scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="العقار غير موجود")
+    # Data isolation: non-admin can only view their own properties
+    if current_user.role != "admin" and prop.agent_id != current_user.id:
+        raise HTTPException(status_code=403, detail="غير مصرح - لا يمكنك عرض هذا العقار")
     return prop_to_response(prop)
 
 
