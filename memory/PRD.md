@@ -28,6 +28,21 @@ Integrate Supabase Postgres as primary database (replacing MongoDB). Add `govern
 - Renamed app to "عقاراتي" in header, auth page, and browser title
 - Backend tests: 17/17 pass (JWT auth, property CRUD, location filter, admin stats, subscription plans)
 
+## Iteration 3 (2026-07-01) — Subscription Overhaul
+- **Admin-only subscription mutations**: `POST /api/subscriptions` restricted to admin (403 for agents); can grant plan to any user via optional `user_id` in body. `DELETE /api/subscriptions/{id}` admin-only.
+- **New plan structure & pricing**: monthly=25000, quarterly=65000, **yearly=275000** (bumped from 250000), plus admin-only `trial` (0 IQD, 7 days).
+- `GET /api/subscriptions/plans` returns 3 public plans (trial excluded).
+- `GET /api/admin/subscriptions/plans` admin-only, returns all 4 plans.
+- `GET /api/admin/users` admin-only, returns all users with office_name (for subscription assignment picker).
+- `GET /api/subscriptions/status` — new endpoint returning `{has_active, days_remaining, end_date, plan_type, status}` where status ∈ `active|warning|expired`. Admin always `active`.
+- **Expiry-gated property mutations**: `POST` / `PUT /api/properties` now returns **HTTP 402** with `"انتهى اشتراكك — تواصل معنا للتجديد"` for agents with no active sub. Admin bypasses. GET still works.
+- Frontend: added persistent `<ContactFooter>` (WhatsApp + Instagram) on every authenticated page.
+- Frontend: added `<SubscriptionBanner>` (yellow warning if ≤7 days, red expired) on Dashboard / AddProperty / Subscriptions pages.
+- Frontend: `/subscriptions` page rebuilt — plan cards open `https://wa.me/7760307768?text=اود بتجديد الاشتراك باقة [PLAN_NAME]` in a new tab (no self-activation).
+- Frontend: AddProperty blocked with a red "لا يمكنك إضافة عقارات" screen + WhatsApp CTA when agent's sub is expired.
+- Frontend: AdminDashboard gained a "تفعيل اشتراك لمكتب" panel (user picker + plan picker including trial) + delete button on each subscription row.
+- Backend tests: **30/30 pass (100%)**.
+
 ## Iteration 2 (2026-07-01)
 - Moved "Made with Emergent" watermark to **top-right corner** (`top:16px; right:16px`) so it never overlaps buttons/inputs
 - **Data isolation between offices/agents**:
