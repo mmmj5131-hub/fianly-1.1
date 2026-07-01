@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import { PROPERTY } from '../constants/testIds';
-import { ChevronLeft, ChevronRight, Home, DollarSign, Ruler, BedDouble, Upload, Phone, User } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Home, DollarSign, Ruler, BedDouble, Upload, Phone, User, MapPin } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const STEPS = [
   { title: 'المعلومات الأساسية', icon: Home },
+  { title: 'الموقع', icon: MapPin },
   { title: 'الأبعاد', icon: Ruler },
   { title: 'التفاصيل الداخلية', icon: BedDouble },
   { title: 'معلومات التواصل', icon: Phone },
@@ -32,6 +33,8 @@ export const AddProperty = () => {
     bathrooms: '',
     owner_name: '',
     owner_phone: '',
+    governorate: '',
+    district: '',
     images: [],
     status: 'available',
   });
@@ -45,18 +48,24 @@ export const AddProperty = () => {
       }
     }
     if (currentStep === 1) {
+      if (!formData.governorate || !formData.district) {
+        setError('يرجى إدخال المحافظة والقضاء');
+        return;
+      }
+    }
+    if (currentStep === 2) {
       if (!formData.front_width || !formData.length) {
         setError('يرجى إدخال جميع الحقول');
         return;
       }
     }
-    if (currentStep === 2) {
+    if (currentStep === 3) {
       if (!formData.bedrooms || !formData.bathrooms) {
         setError('يرجى إدخال جميع الحقول');
         return;
       }
     }
-    if (currentStep === 3) {
+    if (currentStep === 4) {
       if (!formData.owner_name || !formData.owner_phone) {
         setError('يرجى إدخال جميع الحقول');
         return;
@@ -115,6 +124,8 @@ export const AddProperty = () => {
         bathrooms: parseInt(formData.bathrooms),
         owner_name: formData.owner_name,
         owner_phone: formData.owner_phone,
+        governorate: formData.governorate,
+        district: formData.district,
         images: formData.images,
         status: formData.status,
       };
@@ -183,6 +194,46 @@ export const AddProperty = () => {
             </div>
             <div>
               <label className="block text-2xl font-extrabold text-[#0A1F13] mb-3">
+                <MapPin className="inline-block w-8 h-8 ml-2" />
+                المحافظة
+              </label>
+              <input
+                data-testid="property-governorate-input"
+                type="text"
+                value={formData.governorate}
+                onChange={(e) => setFormData({ ...formData, governorate: e.target.value })}
+                className="w-full min-h-[64px] text-2xl p-4 rounded-xl border-2 border-[#D2CFC9] focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold"
+                placeholder="مثال: بغداد"
+              />
+            </div>
+            <div>
+              <label className="block text-2xl font-extrabold text-[#0A1F13] mb-3">
+                <MapPin className="inline-block w-8 h-8 ml-2" />
+                القضاء
+              </label>
+              <input
+                data-testid="property-district-input"
+                type="text"
+                value={formData.district}
+                onChange={(e) => setFormData({ ...formData, district: e.target.value })}
+                className="w-full min-h-[64px] text-2xl p-4 rounded-xl border-2 border-[#D2CFC9] focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold"
+                placeholder="مثال: الكرادة"
+              />
+            </div>
+          </div>
+        );
+
+      case 2:
+        return (
+          <div className="space-y-8">
+            <div className="text-center mb-8">
+              <StepIcon className="w-20 h-20 text-[#1A5632] mx-auto mb-4" />
+              <h2 className="text-4xl font-extrabold text-[#0A1F13]">
+                {STEPS[currentStep].title}
+              </h2>
+            </div>
+            <div>
+              <label className="block text-2xl font-extrabold text-[#0A1F13] mb-3">
                 <Ruler className="inline-block w-8 h-8 ml-2" />
                 مساحة الواجهة (متر)
               </label>
@@ -212,7 +263,7 @@ export const AddProperty = () => {
           </div>
         );
 
-      case 2:
+      case 3:
         return (
           <div className="space-y-8">
             <div className="text-center mb-8">
@@ -252,7 +303,7 @@ export const AddProperty = () => {
           </div>
         );
 
-      case 3:
+      case 4:
         return (
           <div className="space-y-8">
             <div className="text-center mb-8">
@@ -292,7 +343,7 @@ export const AddProperty = () => {
           </div>
         );
 
-      case 4:
+      case 5:
         return (
           <div className="space-y-8">
             <div className="text-center mb-8">

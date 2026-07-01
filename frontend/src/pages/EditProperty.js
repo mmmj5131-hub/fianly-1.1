@@ -13,6 +13,7 @@ import {
   Save,
   ArrowRight,
   Trash2,
+  MapPin,
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -35,6 +36,8 @@ export const EditProperty = () => {
     bathrooms: '',
     owner_name: '',
     owner_phone: '',
+    governorate: '',
+    district: '',
     images: [],
     status: 'available',
   });
@@ -57,6 +60,8 @@ export const EditProperty = () => {
           bathrooms: data.bathrooms.toString(),
           owner_name: data.owner_name || '',
           owner_phone: data.owner_phone,
+          governorate: data.governorate || '',
+          district: data.district || '',
           images: data.images || [],
           status: data.status,
         });
@@ -119,6 +124,8 @@ export const EditProperty = () => {
         bathrooms: parseInt(formData.bathrooms),
         owner_name: formData.owner_name,
         owner_phone: formData.owner_phone,
+        governorate: formData.governorate,
+        district: formData.district,
         images: formData.images,
         status: formData.status,
       };
@@ -264,6 +271,37 @@ export const EditProperty = () => {
                 value={formData.bathrooms}
                 onChange={(e) => setFormData({ ...formData, bathrooms: e.target.value })}
                 className="w-full min-h-[64px] text-2xl p-4 rounded-xl border-2 border-[#D2CFC9] focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-2xl font-extrabold text-[#0A1F13] mb-3">
+                <MapPin className="inline-block w-8 h-8 ml-2" />
+                المحافظة
+              </label>
+              <input
+                data-testid="property-governorate-input"
+                type="text"
+                value={formData.governorate}
+                onChange={(e) => setFormData({ ...formData, governorate: e.target.value })}
+                className="w-full min-h-[64px] text-2xl p-4 rounded-xl border-2 border-[#D2CFC9] focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold"
+                placeholder="مثال: بغداد"
+              />
+            </div>
+            <div>
+              <label className="block text-2xl font-extrabold text-[#0A1F13] mb-3">
+                <MapPin className="inline-block w-8 h-8 ml-2" />
+                القضاء
+              </label>
+              <input
+                data-testid="property-district-input"
+                type="text"
+                value={formData.district}
+                onChange={(e) => setFormData({ ...formData, district: e.target.value })}
+                className="w-full min-h-[64px] text-2xl p-4 rounded-xl border-2 border-[#D2CFC9] focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold"
+                placeholder="مثال: الكرادة"
               />
             </div>
           </div>

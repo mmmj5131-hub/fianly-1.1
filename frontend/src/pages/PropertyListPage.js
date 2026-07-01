@@ -36,6 +36,8 @@ export const PropertyListPage = ({ status, testid }) => {
   const navigate = useNavigate();
   const [properties, setProperties] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [governorateFilter, setGovernorateFilter] = useState('');
+  const [districtFilter, setDistrictFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -46,7 +48,10 @@ export const PropertyListPage = ({ status, testid }) => {
     const fetchProperties = async () => {
       setLoading(true);
       try {
-        const { data } = await axios.get(`${API}/properties?status=${status}`, {
+        const params = new URLSearchParams({ status });
+        if (governorateFilter) params.append('governorate', governorateFilter);
+        if (districtFilter) params.append('district', districtFilter);
+        const { data } = await axios.get(`${API}/properties?${params.toString()}`, {
           withCredentials: true,
         });
         setProperties(data);
@@ -57,7 +62,7 @@ export const PropertyListPage = ({ status, testid }) => {
       }
     };
     fetchProperties();
-  }, [status]);
+  }, [status, governorateFilter, districtFilter]);
 
   const handleLogout = async () => {
     await logout();
@@ -72,7 +77,9 @@ export const PropertyListPage = ({ status, testid }) => {
       prop.price.toString().includes(query) ||
       prop.bedrooms.toString().includes(query) ||
       (prop.owner_name && prop.owner_name.toLowerCase().includes(query)) ||
-      prop.agent_name.toLowerCase().includes(query)
+      prop.agent_name.toLowerCase().includes(query) ||
+      (prop.governorate && prop.governorate.toLowerCase().includes(query)) ||
+      (prop.district && prop.district.toLowerCase().includes(query))
     );
   });
 
@@ -91,7 +98,7 @@ export const PropertyListPage = ({ status, testid }) => {
           <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
             <Building2 className="w-12 h-12 sm:w-16 sm:h-16 text-[#1A5632] flex-shrink-0" />
             <div className="flex-1">
-              <h1 className="text-2xl sm:text-4xl font-black text-[#0A1F13]">عقاري الميسر</h1>
+              <h1 className="text-2xl sm:text-4xl font-black text-[#0A1F13]">عقاراتي</h1>
               <p className="text-base sm:text-xl font-bold text-[#2B4736]">مرحباً {user?.name}</p>
             </div>
             {/* Mobile menu toggle */}
@@ -226,7 +233,7 @@ export const PropertyListPage = ({ status, testid }) => {
 
       {/* Search Bar */}
       <div className="max-w-7xl mx-auto mb-6">
-        <div className="bg-white border-2 border-[#D2CFC9] rounded-3xl p-4 sm:p-6">
+        <div className="bg-white border-2 border-[#D2CFC9] rounded-3xl p-4 sm:p-6 space-y-4">
           <div className="flex items-center gap-3 sm:gap-4">
             <Search className="w-8 h-8 sm:w-10 sm:h-10 text-[#2B4736] flex-shrink-0" />
             <input
@@ -234,9 +241,33 @@ export const PropertyListPage = ({ status, testid }) => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ابحث بالمساحة، السعر، اسم المالك..."
+              placeholder="ابحث بالمساحة، السعر، اسم المالك، المحافظة، القضاء..."
               className="flex-1 min-h-[56px] text-xl sm:text-2xl p-3 sm:p-4 border-2 border-[#D2CFC9] rounded-xl focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold"
             />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-7 h-7 text-[#1A5632] flex-shrink-0" />
+              <input
+                data-testid="filter-governorate-input"
+                type="text"
+                value={governorateFilter}
+                onChange={(e) => setGovernorateFilter(e.target.value)}
+                placeholder="المحافظة"
+                className="flex-1 min-h-[52px] text-lg sm:text-xl p-3 border-2 border-[#D2CFC9] rounded-xl focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <MapPin className="w-7 h-7 text-[#1A5632] flex-shrink-0" />
+              <input
+                data-testid="filter-district-input"
+                type="text"
+                value={districtFilter}
+                onChange={(e) => setDistrictFilter(e.target.value)}
+                placeholder="القضاء"
+                className="flex-1 min-h-[52px] text-lg sm:text-xl p-3 border-2 border-[#D2CFC9] rounded-xl focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -297,6 +328,14 @@ export const PropertyListPage = ({ status, testid }) => {
                       {property.total_area} متر مربع
                     </span>
                   </div>
+                  {(property.governorate || property.district) && (
+                    <div className="flex items-center gap-2 mb-3">
+                      <MapPin className="w-6 h-6 text-[#1A5632]" />
+                      <span className="text-lg font-bold text-[#0A1F13]">
+                        {[property.governorate, property.district].filter(Boolean).join(' - ')}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-6 mb-4">
                     <div className="flex items-center gap-2">
                       <Bed className="w-6 h-6 text-[#2B4736]" />

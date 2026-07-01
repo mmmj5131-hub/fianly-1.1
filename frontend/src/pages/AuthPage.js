@@ -56,7 +56,7 @@ export const AuthPage = () => {
             <Building className="w-24 h-24 text-[#1A5632]" />
           </div>
           <h1 className="text-5xl sm:text-6xl font-black text-[#0A1F13] mb-4">
-            عقاري الميسر
+            عقاراتي
           </h1>
           <p className="text-2xl font-semibold text-[#2B4736]">
             منصة عقارية سهلة الاستخدام

@@ -197,6 +197,32 @@ export const PropertyDetails = () => {
             <div className="bg-[#F9F6F0] rounded-2xl p-6 border-2 border-[#D2CFC9]">
               <div className="flex items-center gap-3 mb-2">
                 <MapPin className="w-10 h-10 text-[#1A5632]" />
+                <span className="text-2xl font-bold text-[#2B4736]">المحافظة</span>
+              </div>
+              <p
+                className="text-3xl font-black text-[#0A1F13]"
+                data-testid="property-detail-governorate"
+              >
+                {property.governorate || 'غير محدد'}
+              </p>
+            </div>
+
+            <div className="bg-[#F9F6F0] rounded-2xl p-6 border-2 border-[#D2CFC9]">
+              <div className="flex items-center gap-3 mb-2">
+                <MapPin className="w-10 h-10 text-[#1A5632]" />
+                <span className="text-2xl font-bold text-[#2B4736]">القضاء</span>
+              </div>
+              <p
+                className="text-3xl font-black text-[#0A1F13]"
+                data-testid="property-detail-district"
+              >
+                {property.district || 'غير محدد'}
+              </p>
+            </div>
+
+            <div className="bg-[#F9F6F0] rounded-2xl p-6 border-2 border-[#D2CFC9]">
+              <div className="flex items-center gap-3 mb-2">
+                <MapPin className="w-10 h-10 text-[#1A5632]" />
                 <span className="text-2xl font-bold text-[#2B4736]">المساحة الكلية</span>
               </div>
               <p

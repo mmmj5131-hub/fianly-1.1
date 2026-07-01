@@ -1,79 +1,71 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Header, Query, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
 import requests
-import secrets
+
+from sqlalchemy import select, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from database import AsyncSessionLocal, engine, get_db
+from models import User, Property, Subscription, FileRecord, Office
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Create the main app without a prefix
 app = FastAPI()
-
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# JWT Configuration
 JWT_ALGORITHM = "HS256"
 JWT_SECRET = os.environ.get("JWT_SECRET", "your-secret-key-change-in-production")
 
-# Object Storage Configuration
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = "aqari-almuyassar"
 storage_key = None
 
-# Password Hashing
+
+# ---------- Password ----------
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
-    return hashed.decode("utf-8")
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
-# JWT Functions
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
+
+# ---------- JWT ----------
 def create_access_token(user_id: str, email: str) -> str:
     payload = {
-        "sub": user_id,
-        "email": email,
+        "sub": user_id, "email": email,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
-        "type": "access"
+        "type": "access",
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
 
 def create_refresh_token(user_id: str) -> str:
     payload = {
         "sub": user_id,
         "exp": datetime.now(timezone.utc) + timedelta(days=7),
-        "type": "refresh"
+        "type": "refresh",
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
-# Auth Dependency
-async def get_current_user(request: Request) -> dict:
+
+async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     token = request.cookies.get("access_token")
     if not token:
         auth_header = request.headers.get("Authorization", "")
@@ -85,61 +77,55 @@ async def get_current_user(request: Request) -> dict:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         if payload.get("type") != "access":
             raise HTTPException(status_code=401, detail="Invalid token type")
-        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+        result = await db.execute(select(User).where(User.id == payload["sub"]))
+        user = result.scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
-        user.pop("password_hash", None)
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-# Object Storage Functions
+
+# ---------- Object Storage ----------
 def init_storage():
     global storage_key
     if storage_key:
         return storage_key
     try:
-        resp = requests.post(
-            f"{STORAGE_URL}/init",
-            json={"emergent_key": EMERGENT_KEY},
-            timeout=30
-        )
+        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
         resp.raise_for_status()
         storage_key = resp.json()["storage_key"]
-        logger.info("Storage initialized successfully")
+        logger.info("Storage initialized")
         return storage_key
     except Exception as e:
         logger.error(f"Storage init failed: {e}")
         return None
 
+
 def put_object(path: str, data: bytes, content_type: str) -> dict:
     key = init_storage()
     if not key:
         raise HTTPException(status_code=500, detail="Storage not initialized")
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data,
-        timeout=120
-    )
+    resp = requests.put(f"{STORAGE_URL}/objects/{path}",
+                        headers={"X-Storage-Key": key, "Content-Type": content_type},
+                        data=data, timeout=120)
     resp.raise_for_status()
     return resp.json()
 
-def get_object(path: str) -> tuple[bytes, str]:
+
+def get_object(path: str) -> tuple:
     key = init_storage()
     if not key:
         raise HTTPException(status_code=500, detail="Storage not initialized")
-    resp = requests.get(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key},
-        timeout=60
-    )
+    resp = requests.get(f"{STORAGE_URL}/objects/{path}",
+                        headers={"X-Storage-Key": key}, timeout=60)
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
-# Pydantic Models
+
+# ---------- Pydantic Schemas ----------
 class UserRegister(BaseModel):
     name: str
     email: Optional[str] = None
@@ -147,9 +133,11 @@ class UserRegister(BaseModel):
     password: str
     office_name: Optional[str] = None
 
+
 class UserLogin(BaseModel):
-    identifier: str  # email or phone
+    identifier: str
     password: str
+
 
 class UserResponse(BaseModel):
     id: str
@@ -160,6 +148,7 @@ class UserResponse(BaseModel):
     office_name: Optional[str] = None
     created_at: str
 
+
 class PropertyCreate(BaseModel):
     total_area: float
     price: float
@@ -167,10 +156,13 @@ class PropertyCreate(BaseModel):
     length: float
     bedrooms: int
     bathrooms: int
-    owner_name: str
+    owner_name: Optional[str] = ""
     owner_phone: str
     images: Optional[List[str]] = []
-    status: str = "available"  # available, sold, rented
+    status: str = "available"
+    governorate: Optional[str] = None
+    district: Optional[str] = None
+
 
 class PropertyResponse(BaseModel):
     id: str
@@ -187,9 +179,13 @@ class PropertyResponse(BaseModel):
     agent_id: str
     agent_name: str
     created_at: str
+    governorate: Optional[str] = None
+    district: Optional[str] = None
+
 
 class SubscriptionPlan(BaseModel):
-    plan_type: str  # monthly, quarterly, yearly
+    plan_type: str
+
 
 class SubscriptionResponse(BaseModel):
     id: str
@@ -201,8 +197,9 @@ class SubscriptionResponse(BaseModel):
     currency: str
     start_date: str
     end_date: str
-    status: str  # active, expired
+    status: str
     created_at: str
+
 
 class AdminStats(BaseModel):
     total_properties: int
@@ -212,162 +209,165 @@ class AdminStats(BaseModel):
     total_offices: int
     expiring_soon: int
 
+
 PLAN_PRICING = {
     "monthly": {"amount": 25000, "days": 30, "label": "اشتراك شهري"},
     "quarterly": {"amount": 65000, "days": 90, "label": "اشتراك ثلاثة أشهر"},
     "yearly": {"amount": 250000, "days": 365, "label": "اشتراك سنوي"},
 }
 
-# Admin Seeding
+
+# ---------- Serializers ----------
+async def user_to_response(user: User, db: AsyncSession) -> UserResponse:
+    office_name = None
+    if user.office_id:
+        result = await db.execute(select(Office).where(Office.id == user.office_id))
+        office = result.scalar_one_or_none()
+        if office:
+            office_name = office.office_name
+    return UserResponse(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        phone=user.phone,
+        role=user.role,
+        office_name=office_name,
+        created_at=user.created_at.isoformat() if user.created_at else "",
+    )
+
+
+def prop_to_response(p: Property) -> PropertyResponse:
+    return PropertyResponse(
+        id=p.id, total_area=p.total_area, price=p.price,
+        front_width=p.front_width, length=p.length,
+        bedrooms=p.bedrooms, bathrooms=p.bathrooms,
+        owner_name=p.owner_name or "", owner_phone=p.owner_phone,
+        images=p.images or [], status=p.status,
+        agent_id=p.agent_id, agent_name=p.agent_name,
+        created_at=p.created_at.isoformat() if p.created_at else "",
+        governorate=p.governorate, district=p.district,
+    )
+
+
+def sub_to_response(s: Subscription) -> SubscriptionResponse:
+    return SubscriptionResponse(
+        id=s.id, user_id=s.user_id, user_name=s.user_name,
+        office_name=s.office_name, plan_type=s.plan_type,
+        amount=s.amount, currency=s.currency,
+        start_date=s.start_date.isoformat() if s.start_date else "",
+        end_date=s.end_date.isoformat() if s.end_date else "",
+        status=s.status,
+        created_at=s.created_at.isoformat() if s.created_at else "",
+    )
+
+
+# ---------- Admin Seed ----------
 async def seed_admin():
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@aqari.com")
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
-    
-    existing = await db.users.find_one({"email": admin_email}, {"_id": 0})
-    if existing is None:
-        admin_user = {
-            "id": str(uuid.uuid4()),
-            "email": admin_email,
-            "name": "المدير العام",
-            "role": "admin",
-            "password_hash": hash_password(admin_password),
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.users.insert_one(admin_user)
-        logger.info(f"Admin created: {admin_email}")
-    elif not verify_password(admin_password, existing["password_hash"]):
-        await db.users.update_one(
-            {"email": admin_email},
-            {"$set": {"password_hash": hash_password(admin_password)}}
-        )
-        logger.info("Admin password updated")
-    
-    # Write test credentials
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User).where(User.email == admin_email))
+        existing = result.scalar_one_or_none()
+        if existing is None:
+            admin = User(
+                id=str(uuid.uuid4()),
+                email=admin_email,
+                name="المدير العام",
+                role="admin",
+                password_hash=hash_password(admin_password),
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(admin)
+            await db.commit()
+            logger.info(f"Admin created: {admin_email}")
+        elif not verify_password(admin_password, existing.password_hash):
+            existing.password_hash = hash_password(admin_password)
+            await db.commit()
+            logger.info("Admin password updated")
+
     Path("/app/memory").mkdir(exist_ok=True)
     with open("/app/memory/test_credentials.md", "w", encoding="utf-8") as f:
-        f.write("# Test Credentials\n\n")
-        f.write("## Admin Account\n")
-        f.write(f"- Email: {admin_email}\n")
-        f.write(f"- Password: {admin_password}\n")
-        f.write(f"- Role: admin\n\n")
-        f.write("## API Endpoints\n")
-        f.write("- POST /api/auth/register\n")
-        f.write("- POST /api/auth/login\n")
-        f.write("- GET /api/auth/me\n")
-        f.write("- POST /api/auth/logout\n")
-        f.write("- GET /api/properties\n")
-        f.write("- POST /api/properties\n")
-        f.write("- GET /api/admin/stats\n")
+        f.write("# Test Credentials\n\n## Admin Account\n")
+        f.write(f"- Email: {admin_email}\n- Password: {admin_password}\n- Role: admin\n\n")
+        f.write("## Database\n- Supabase Postgres (Transaction Pooler)\n")
 
-# Auth Routes
+
+# ---------- Auth ----------
+def _set_cookies(response: Response, access_token: str, refresh_token: str):
+    response.set_cookie(key="access_token", value=access_token,
+                        httponly=True, secure=False, samesite="lax",
+                        max_age=900, path="/")
+    response.set_cookie(key="refresh_token", value=refresh_token,
+                        httponly=True, secure=False, samesite="lax",
+                        max_age=604800, path="/")
+
+
 @api_router.post("/auth/register", response_model=UserResponse)
-async def register(user: UserRegister, response: Response):
+async def register(user: UserRegister, response: Response, db: AsyncSession = Depends(get_db)):
     if not user.email and not user.phone:
         raise HTTPException(status_code=400, detail="يجب إدخال البريد الإلكتروني أو رقم الهاتف")
-    
-    # Check if user exists
-    query = {}
+
+    conds = []
     if user.email:
-        query["email"] = user.email.lower()
+        conds.append(User.email == user.email.lower())
     if user.phone:
-        query["phone"] = user.phone
-    
-    existing = await db.users.find_one(query, {"_id": 0})
-    if existing:
+        conds.append(User.phone == user.phone)
+    from sqlalchemy import or_
+    result = await db.execute(select(User).where(or_(*conds)))
+    if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="المستخدم موجود بالفعل")
-    
-    # Create user
-    user_id = str(uuid.uuid4())
-    new_user = {
-        "id": user_id,
-        "name": user.name,
-        "role": "agent",
-        "password_hash": hash_password(user.password),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    if user.email:
-        new_user["email"] = user.email.lower()
-    if user.phone:
-        new_user["phone"] = user.phone
+
+    # Office: find-or-create
+    office_id = None
     if user.office_name:
-        new_user["office_name"] = user.office_name
-    
-    await db.users.insert_one(new_user)
-    
-    # Create tokens
-    access_token = create_access_token(user_id, user.email or user.phone)
-    refresh_token = create_refresh_token(user_id)
-    
-    # Set cookies
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=900,
-        path="/"
+        result = await db.execute(select(Office).where(Office.office_name == user.office_name))
+        office = result.scalar_one_or_none()
+        if not office:
+            office = Office(id=uuid.uuid4(), office_name=user.office_name, phone_number=user.phone)
+            db.add(office)
+            await db.flush()
+        office_id = office.id
+
+    user_id = str(uuid.uuid4())
+    new_user = User(
+        id=user_id,
+        name=user.name,
+        email=user.email.lower() if user.email else None,
+        phone=user.phone,
+        role="agent",
+        password_hash=hash_password(user.password),
+        office_id=office_id,
+        created_at=datetime.now(timezone.utc),
     )
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=604800,
-        path="/"
-    )
-    
-    new_user.pop("password_hash")
-    return UserResponse(**new_user)
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    access = create_access_token(user_id, user.email or user.phone)
+    refresh = create_refresh_token(user_id)
+    _set_cookies(response, access, refresh)
+    return await user_to_response(new_user, db)
+
 
 @api_router.post("/auth/login", response_model=UserResponse)
-async def login(credentials: UserLogin, response: Response):
-    # Find user by email or phone
+async def login(credentials: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
     identifier = credentials.identifier.lower() if "@" in credentials.identifier else credentials.identifier
-    
-    user = await db.users.find_one(
-        {"$or": [{"email": identifier}, {"phone": identifier}]},
-        {"_id": 0}
-    )
-    
-    if not user:
+    from sqlalchemy import or_
+    result = await db.execute(select(User).where(or_(User.email == identifier, User.phone == identifier)))
+    user = result.scalar_one_or_none()
+    if not user or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(status_code=401, detail="البريد الإلكتروني أو كلمة المرور غير صحيحة")
-    
-    if not verify_password(credentials.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="البريد الإلكتروني أو كلمة المرور غير صحيحة")
-    
-    # Create tokens
-    access_token = create_access_token(user["id"], user.get("email", user.get("phone")))
-    refresh_token = create_refresh_token(user["id"])
-    
-    # Set cookies
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=900,
-        path="/"
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=604800,
-        path="/"
-    )
-    
-    user.pop("password_hash")
-    return UserResponse(**user)
+
+    access = create_access_token(user.id, user.email or user.phone)
+    refresh = create_refresh_token(user.id)
+    _set_cookies(response, access, refresh)
+    return await user_to_response(user, db)
+
 
 @api_router.get("/auth/me", response_model=UserResponse)
-async def get_me(current_user: dict = Depends(get_current_user)):
-    return UserResponse(**current_user)
+async def get_me(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await user_to_response(current_user, db)
+
 
 @api_router.post("/auth/logout")
 async def logout(response: Response):
@@ -375,33 +375,45 @@ async def logout(response: Response):
     response.delete_cookie(key="refresh_token", path="/")
     return {"message": "تم تسجيل الخروج بنجاح"}
 
-# Property Routes
+
+# ---------- Properties ----------
 @api_router.post("/properties", response_model=PropertyResponse)
-async def create_property(property_data: PropertyCreate, current_user: dict = Depends(get_current_user)):
-    property_id = str(uuid.uuid4())
-    property_doc = {
-        "id": property_id,
-        **property_data.model_dump(),
-        "agent_id": current_user["id"],
-        "agent_name": current_user["name"],
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    await db.properties.insert_one(property_doc)
-    property_doc.pop("_id", None)
-    return PropertyResponse(**property_doc)
+async def create_property(data: PropertyCreate,
+                          current_user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    prop = Property(
+        id=str(uuid.uuid4()),
+        **data.model_dump(),
+        agent_id=current_user.id,
+        agent_name=current_user.name,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(prop)
+    await db.commit()
+    await db.refresh(prop)
+    return prop_to_response(prop)
+
 
 @api_router.get("/properties", response_model=List[PropertyResponse])
-async def get_properties(skip: int = 0, limit: int = 50, status: Optional[str] = None):
-    query = {}
+async def get_properties(skip: int = 0, limit: int = 50,
+                         status: Optional[str] = None,
+                         governorate: Optional[str] = None,
+                         district: Optional[str] = None,
+                         db: AsyncSession = Depends(get_db)):
+    stmt = select(Property)
+    conds = []
     if status:
-        query["status"] = status
-    properties = await db.properties.find(query, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
-    # Ensure owner_name exists for older docs
-    for p in properties:
-        if "owner_name" not in p:
-            p["owner_name"] = ""
-    return [PropertyResponse(**prop) for prop in properties]
+        conds.append(Property.status == status)
+    if governorate:
+        conds.append(Property.governorate.ilike(f"%{governorate}%"))
+    if district:
+        conds.append(Property.district.ilike(f"%{district}%"))
+    if conds:
+        stmt = stmt.where(and_(*conds))
+    stmt = stmt.order_by(Property.created_at.desc()).offset(skip).limit(limit)
+    result = await db.execute(stmt)
+    return [prop_to_response(p) for p in result.scalars().all()]
+
 
 @api_router.get("/properties/search", response_model=List[PropertyResponse])
 async def search_properties(
@@ -411,148 +423,143 @@ async def search_properties(
     min_area: Optional[float] = None,
     max_area: Optional[float] = None,
     bedrooms: Optional[int] = None,
-    status: Optional[str] = None
+    status: Optional[str] = None,
+    governorate: Optional[str] = None,
+    district: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
 ):
-    search_filter = {}
-    
-    if min_price or max_price:
-        search_filter["price"] = {}
-        if min_price:
-            search_filter["price"]["$gte"] = min_price
-        if max_price:
-            search_filter["price"]["$lte"] = max_price
-    
-    if min_area or max_area:
-        search_filter["total_area"] = {}
-        if min_area:
-            search_filter["total_area"]["$gte"] = min_area
-        if max_area:
-            search_filter["total_area"]["$lte"] = max_area
-    
-    if bedrooms:
-        search_filter["bedrooms"] = bedrooms
-    
+    conds = []
+    if min_price is not None:
+        conds.append(Property.price >= min_price)
+    if max_price is not None:
+        conds.append(Property.price <= max_price)
+    if min_area is not None:
+        conds.append(Property.total_area >= min_area)
+    if max_area is not None:
+        conds.append(Property.total_area <= max_area)
+    if bedrooms is not None:
+        conds.append(Property.bedrooms == bedrooms)
     if status:
-        search_filter["status"] = status
-    
-    properties = await db.properties.find(search_filter, {"_id": 0}).to_list(100)
-    return [PropertyResponse(**prop) for prop in properties]
+        conds.append(Property.status == status)
+    if governorate:
+        conds.append(Property.governorate.ilike(f"%{governorate}%"))
+    if district:
+        conds.append(Property.district.ilike(f"%{district}%"))
+
+    stmt = select(Property)
+    if conds:
+        stmt = stmt.where(and_(*conds))
+    stmt = stmt.limit(100)
+    result = await db.execute(stmt)
+    return [prop_to_response(p) for p in result.scalars().all()]
+
 
 @api_router.get("/properties/{property_id}", response_model=PropertyResponse)
-async def get_property(property_id: str):
-    property_doc = await db.properties.find_one({"id": property_id}, {"_id": 0})
-    if not property_doc:
+async def get_property(property_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Property).where(Property.id == property_id))
+    prop = result.scalar_one_or_none()
+    if not prop:
         raise HTTPException(status_code=404, detail="العقار غير موجود")
-    return PropertyResponse(**property_doc)
+    return prop_to_response(prop)
+
 
 @api_router.put("/properties/{property_id}", response_model=PropertyResponse)
-async def update_property(
-    property_id: str,
-    property_data: PropertyCreate,
-    current_user: dict = Depends(get_current_user)
-):
-    existing = await db.properties.find_one({"id": property_id}, {"_id": 0})
-    if not existing:
+async def update_property(property_id: str, data: PropertyCreate,
+                          current_user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Property).where(Property.id == property_id))
+    prop = result.scalar_one_or_none()
+    if not prop:
         raise HTTPException(status_code=404, detail="العقار غير موجود")
-    
-    # Check ownership or admin
-    if current_user["role"] != "admin" and existing["agent_id"] != current_user["id"]:
+    if current_user.role != "admin" and prop.agent_id != current_user.id:
         raise HTTPException(status_code=403, detail="غير مصرح")
-    
-    update_data = property_data.model_dump()
-    await db.properties.update_one({"id": property_id}, {"$set": update_data})
-    
-    updated = await db.properties.find_one({"id": property_id}, {"_id": 0})
-    return PropertyResponse(**updated)
+    for k, v in data.model_dump().items():
+        setattr(prop, k, v)
+    await db.commit()
+    await db.refresh(prop)
+    return prop_to_response(prop)
+
 
 @api_router.delete("/properties/{property_id}")
-async def delete_property(property_id: str, current_user: dict = Depends(get_current_user)):
-    existing = await db.properties.find_one({"id": property_id}, {"_id": 0})
-    if not existing:
+async def delete_property(property_id: str,
+                          current_user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Property).where(Property.id == property_id))
+    prop = result.scalar_one_or_none()
+    if not prop:
         raise HTTPException(status_code=404, detail="العقار غير موجود")
-    
-    # Check ownership or admin
-    if current_user["role"] != "admin" and existing["agent_id"] != current_user["id"]:
+    if current_user.role != "admin" and prop.agent_id != current_user.id:
         raise HTTPException(status_code=403, detail="غير مصرح")
-    
-    await db.properties.delete_one({"id": property_id})
+    await db.delete(prop)
+    await db.commit()
     return {"message": "تم حذف العقار بنجاح"}
 
-# Upload Route
+
+# ---------- Uploads ----------
 @api_router.post("/upload")
-async def upload_image(
-    file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
-):
+async def upload_image(file: UploadFile = File(...),
+                      current_user: User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
     ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
     file_id = str(uuid.uuid4())
-    path = f"{APP_NAME}/properties/{current_user['id']}/{file_id}.{ext}"
-    
+    path = f"{APP_NAME}/properties/{current_user.id}/{file_id}.{ext}"
+
     data = await file.read()
     result = put_object(path, data, file.content_type or "image/jpeg")
-    
-    # Store reference in DB
-    file_doc = {
-        "id": file_id,
-        "storage_path": result["path"],
-        "original_filename": file.filename,
-        "content_type": file.content_type,
-        "size": result["size"],
-        "user_id": current_user["id"],
-        "is_deleted": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.files.insert_one(file_doc)
-    
+
+    rec = FileRecord(
+        id=file_id, storage_path=result["path"],
+        original_filename=file.filename, content_type=file.content_type,
+        size=result.get("size"), user_id=current_user.id,
+        is_deleted=False, created_at=datetime.now(timezone.utc),
+    )
+    db.add(rec)
+    await db.commit()
+
     return {"id": file_id, "path": result["path"], "url": f"/api/files/{result['path']}"}
 
+
 @api_router.get("/files/{path:path}")
-async def download_file(path: str):
-    record = await db.files.find_one({"storage_path": path, "is_deleted": False}, {"_id": 0})
-    if not record:
+async def download_file(path: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(FileRecord).where(
+        and_(FileRecord.storage_path == path, FileRecord.is_deleted == False)  # noqa: E712
+    ))
+    rec = result.scalar_one_or_none()
+    if not rec:
         raise HTTPException(status_code=404, detail="الملف غير موجود")
-    
     data, content_type = get_object(path)
-    return Response(content=data, media_type=record.get("content_type", content_type))
+    return Response(content=data, media_type=rec.content_type or content_type)
 
-# Admin Routes
+
+# ---------- Admin ----------
 @api_router.get("/admin/stats", response_model=AdminStats)
-async def get_admin_stats(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "admin":
+async def get_admin_stats(current_user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="غير مصرح - للمديرين فقط")
-    
-    total_properties = await db.properties.count_documents({})
-    available = await db.properties.count_documents({"status": "available"})
-    sold = await db.properties.count_documents({"status": "sold"})
-    rented = await db.properties.count_documents({"status": "rented"})
-    
-    # Count unique offices
-    pipeline = [
-        {"$match": {"role": "agent", "office_name": {"$exists": True}}},
-        {"$group": {"_id": "$office_name"}},
-        {"$count": "total"}
-    ]
-    office_count = await db.users.aggregate(pipeline).to_list(1)
-    total_offices = office_count[0]["total"] if office_count else 0
-    
-    # Count expiring soon subscriptions (within 7 days)
-    now = datetime.now(timezone.utc)
-    soon = (now + timedelta(days=7)).isoformat()
-    expiring_soon = await db.subscriptions.count_documents({
-        "status": "active",
-        "end_date": {"$lte": soon, "$gte": now.isoformat()}
-    })
-    
-    return AdminStats(
-        total_properties=total_properties,
-        available=available,
-        sold=sold,
-        rented=rented,
-        total_offices=total_offices,
-        expiring_soon=expiring_soon
-    )
 
-# Subscription Routes
+    total = (await db.execute(select(func.count()).select_from(Property))).scalar() or 0
+    available = (await db.execute(select(func.count()).select_from(Property).where(Property.status == "available"))).scalar() or 0
+    sold = (await db.execute(select(func.count()).select_from(Property).where(Property.status == "sold"))).scalar() or 0
+    rented = (await db.execute(select(func.count()).select_from(Property).where(Property.status == "rented"))).scalar() or 0
+
+    total_offices = (await db.execute(select(func.count()).select_from(Office))).scalar() or 0
+
+    now = datetime.now(timezone.utc)
+    soon = now + timedelta(days=7)
+    expiring_soon = (await db.execute(
+        select(func.count()).select_from(Subscription).where(and_(
+            Subscription.status == "active",
+            Subscription.end_date <= soon,
+            Subscription.end_date >= now,
+        ))
+    )).scalar() or 0
+
+    return AdminStats(total_properties=total, available=available, sold=sold,
+                      rented=rented, total_offices=total_offices, expiring_soon=expiring_soon)
+
+
+# ---------- Subscriptions ----------
 @api_router.get("/subscriptions/plans")
 async def get_subscription_plans():
     return [
@@ -560,99 +567,107 @@ async def get_subscription_plans():
         for k, v in PLAN_PRICING.items()
     ]
 
+
 @api_router.post("/subscriptions", response_model=SubscriptionResponse)
-async def create_subscription(
-    data: SubscriptionPlan,
-    current_user: dict = Depends(get_current_user)
-):
+async def create_subscription(data: SubscriptionPlan,
+                              current_user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
     if data.plan_type not in PLAN_PRICING:
         raise HTTPException(status_code=400, detail="نوع الاشتراك غير صحيح")
-    
     plan = PLAN_PRICING[data.plan_type]
-    sub_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     end_date = now + timedelta(days=plan["days"])
-    
-    subscription = {
-        "id": sub_id,
-        "user_id": current_user["id"],
-        "user_name": current_user["name"],
-        "office_name": current_user.get("office_name", ""),
-        "plan_type": data.plan_type,
-        "amount": plan["amount"],
-        "currency": "IQD",
-        "start_date": now.isoformat(),
-        "end_date": end_date.isoformat(),
-        "status": "active",
-        "created_at": now.isoformat()
-    }
-    
-    await db.subscriptions.insert_one(subscription)
-    return SubscriptionResponse(**subscription)
+
+    office_name = None
+    if current_user.office_id:
+        result = await db.execute(select(Office).where(Office.id == current_user.office_id))
+        office = result.scalar_one_or_none()
+        office_name = office.office_name if office else None
+
+    sub = Subscription(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id, user_name=current_user.name,
+        office_name=office_name,
+        plan_type=data.plan_type, amount=plan["amount"], currency="IQD",
+        start_date=now, end_date=end_date, status="active",
+        created_at=now,
+    )
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+    return sub_to_response(sub)
+
+
+async def _expire_stale(subs: list, db: AsyncSession):
+    now = datetime.now(timezone.utc)
+    for s in subs:
+        if s.status == "active" and s.end_date and s.end_date < now:
+            s.status = "expired"
+    await db.commit()
+
 
 @api_router.get("/subscriptions/me", response_model=List[SubscriptionResponse])
-async def get_my_subscriptions(current_user: dict = Depends(get_current_user)):
-    subs = await db.subscriptions.find(
-        {"user_id": current_user["id"]}, {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
-    
-    # Auto-update expired subscriptions
-    now_iso = datetime.now(timezone.utc).isoformat()
-    for s in subs:
-        if s["status"] == "active" and s["end_date"] < now_iso:
-            await db.subscriptions.update_one({"id": s["id"]}, {"$set": {"status": "expired"}})
-            s["status"] = "expired"
-    
-    return [SubscriptionResponse(**s) for s in subs]
+async def get_my_subscriptions(current_user: User = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Subscription).where(Subscription.user_id == current_user.id)
+        .order_by(Subscription.created_at.desc())
+    )
+    subs = result.scalars().all()
+    await _expire_stale(subs, db)
+    return [sub_to_response(s) for s in subs]
+
 
 @api_router.get("/admin/subscriptions", response_model=List[SubscriptionResponse])
-async def get_all_subscriptions(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "admin":
+async def get_all_subscriptions(current_user: User = Depends(get_current_user),
+                                db: AsyncSession = Depends(get_db)):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="غير مصرح - للمديرين فقط")
-    
-    subs = await db.subscriptions.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    
-    # Auto-update expired
-    now_iso = datetime.now(timezone.utc).isoformat()
-    for s in subs:
-        if s["status"] == "active" and s["end_date"] < now_iso:
-            await db.subscriptions.update_one({"id": s["id"]}, {"$set": {"status": "expired"}})
-            s["status"] = "expired"
-    
-    return [SubscriptionResponse(**s) for s in subs]
+    result = await db.execute(select(Subscription).order_by(Subscription.created_at.desc()).limit(500))
+    subs = result.scalars().all()
+    await _expire_stale(subs, db)
+    return [sub_to_response(s) for s in subs]
+
 
 @api_router.get("/admin/subscriptions/expiring", response_model=List[SubscriptionResponse])
-async def get_expiring_subscriptions(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "admin":
+async def get_expiring_subscriptions(current_user: User = Depends(get_current_user),
+                                     db: AsyncSession = Depends(get_db)):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="غير مصرح - للمديرين فقط")
-    
     now = datetime.now(timezone.utc)
-    soon = (now + timedelta(days=7)).isoformat()
-    
-    subs = await db.subscriptions.find(
-        {"status": "active", "end_date": {"$lte": soon, "$gte": now.isoformat()}},
-        {"_id": 0}
-    ).sort("end_date", 1).to_list(100)
-    
-    return [SubscriptionResponse(**s) for s in subs]
+    soon = now + timedelta(days=7)
+    result = await db.execute(
+        select(Subscription).where(and_(
+            Subscription.status == "active",
+            Subscription.end_date <= soon,
+            Subscription.end_date >= now,
+        )).order_by(Subscription.end_date.asc()).limit(100)
+    )
+    return [sub_to_response(s) for s in result.scalars().all()]
+
 
 @api_router.get("/admin/offices")
-async def get_offices(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "admin":
+async def get_offices(current_user: User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="غير مصرح - للمديرين فقط")
-    
-    pipeline = [
-        {"$match": {"role": "agent", "office_name": {"$exists": True}}},
-        {"$group": {
-            "_id": "$office_name",
-            "agents": {"$push": {"name": "$name", "id": "$id"}},
-            "agent_count": {"$sum": 1}
-        }}
-    ]
-    offices = await db.users.aggregate(pipeline).to_list(100)
-    return [{"office_name": o["_id"], "agents": o["agents"], "agent_count": o["agent_count"]} for o in offices]
 
-# Include the router in the main app
+    result = await db.execute(select(Office))
+    offices = result.scalars().all()
+    output = []
+    for o in offices:
+        agents_result = await db.execute(
+            select(User).where(and_(User.office_id == o.id, User.role == "agent"))
+        )
+        agents = agents_result.scalars().all()
+        output.append({
+            "office_name": o.office_name,
+            "agents": [{"id": a.id, "name": a.name} for a in agents],
+            "agent_count": len(agents),
+        })
+    return output
+
+
 app.include_router(api_router)
 
 app.add_middleware(
@@ -663,16 +678,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.on_event("startup")
 async def startup():
     await seed_admin()
     init_storage()
-    # Create indexes
-    await db.users.create_index("email", unique=True, sparse=True)
-    await db.users.create_index("phone", unique=True, sparse=True)
-    await db.properties.create_index("id", unique=True)
-    logger.info("Application started")
+    logger.info("Application started with Supabase Postgres")
+
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+async def shutdown():
+    await engine.dispose()
