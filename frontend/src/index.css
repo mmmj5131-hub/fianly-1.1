@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@600;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  font-family: 'Cairo', sans-serif !important;
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  direction: rtl;
+}
+
+@layer base {
+  :root {
+    --background: 39 24 8;
+    --foreground: 157 24 13;
+    --card: 0 0% 100%;
+    --card-foreground: 157 24 13;
+    --popover: 0 0% 100%;
+    --popover-foreground: 157 24 13;
+    --primary: 155 54 20;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 157 24 13;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 38 19 82;
+    --muted-foreground: 145 15 43;
+    --accent: 11 70 52;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72 51;
+    --destructive-foreground: 0 0% 98%;
+    --border: 38 8 82;
+    --input: 38 8 82;
+    --ring: 155 54 20;
+    --radius: 1rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-[#F9F6F0] text-[#0A1F13];
+  }
+}
+
+@layer base {
+  [data-debug-wrapper="true"] {
+    display: contents !important;
+  }
+
+  [data-debug-wrapper="true"] > * {
+    margin-left: inherit;
+    margin-right: inherit;
+    margin-top: inherit;
+    margin-bottom: inherit;
+    padding-left: inherit;
+    padding-right: inherit;
+    padding-top: inherit;
+    padding-bottom: inherit;
+    column-gap: inherit;
+    row-gap: inherit;
+    gap: inherit;
+    border-left-width: inherit;
+    border-right-width: inherit;
+    border-top-width: inherit;
+    border-bottom-width: inherit;
+    border-left-style: inherit;
+    border-right-style: inherit;
+    border-top-style: inherit;
+    border-bottom-style: inherit;
+    border-left-color: inherit;
+    border-right-color: inherit;
+    border-top-color: inherit;
+    border-bottom-color: inherit;
+  }
+}

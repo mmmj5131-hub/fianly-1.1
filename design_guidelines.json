@@ -1,0 +1,122 @@
+{
+  "project_name": "عقاري الميسر",
+  "theme": "light",
+  "archetype": "1 (Organic & Earthy)",
+  "reasoning": "Elderly users require warmth, calm, and absolute clarity. The 'Organic & Earthy' archetype in a light theme provides a non-clinical, approachable environment. We will use an ultra-high contrast execution (approaching Brutalist clarity but with warm tones) to ensure legibility without straining aging eyes.",
+  "rtl_guidelines": {
+    "direction": "rtl",
+    "html_attribute": "dir=\"rtl\"",
+    "tailwind_logical_properties": "Mandatory. Use 'ps-' (padding start), 'pe-' (padding end), 'ms-' (margin start), 'me-' (margin end) instead of 'pl', 'pr', 'ml', 'mr'.",
+    "icons": "Ensure back/forward arrows point correctly for RTL (Back is right arrow, Forward/Next is left arrow)."
+  },
+  "typography": {
+    "heading_font": "Cairo",
+    "body_font": "Cairo",
+    "import_url": "https://fonts.googleapis.com/css2?family=Cairo:wght@600;800;900&display=swap",
+    "hierarchy": {
+      "h1": "text-5xl sm:text-6xl font-black tracking-tight",
+      "h2": "text-4xl sm:text-5xl font-extrabold",
+      "h3": "text-3xl sm:text-4xl font-bold",
+      "h4": "text-2xl sm:text-3xl font-bold",
+      "body": "text-xl sm:text-2xl font-semibold leading-relaxed",
+      "labels": "text-2xl font-extrabold",
+      "button_text": "text-2xl sm:text-3xl font-black"
+    },
+    "rules": [
+      "No regular or light font weights. Everything must be semibold, bold, extrabold, or black.",
+      "Never use Inter or default generic fonts.",
+      "Ensure line-height (leading) is relaxed for body text to improve readability."
+    ]
+  },
+  "colors": {
+    "background": {
+      "primary": "#F9F6F0",
+      "secondary": "#FFFFFF",
+      "card": "#FFFFFF"
+    },
+    "text": {
+      "primary": "#0A1F13",
+      "secondary": "#2B4736",
+      "placeholder": "#6B7A70"
+    },
+    "brand": {
+      "primary": "#1A5632",
+      "primary_hover": "#0F3820",
+      "accent": "#D95D39"
+    },
+    "border": {
+      "default": "#D2CFC9",
+      "active": "#1A5632"
+    },
+    "states": {
+      "error": "#B91C1C",
+      "success": "#15803D"
+    },
+    "contrast_rules": "All text must pass WCAG AAA contrast ratio. No low-contrast placeholders or disabled states that fade out too much."
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing, Single Focus.",
+    "wizard_layout": {
+      "container": "max-w-2xl mx-auto min-h-[70vh] flex flex-col justify-center",
+      "content": "One or two input fields per screen MAXIMUM.",
+      "padding": "p-8 sm:p-12"
+    },
+    "admin_dashboard_layout": {
+      "structure": "RTL Sidebar + Main Content Area",
+      "grid": "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6",
+      "card_style": "Solid background, thick 2px borders, deep drop shadows."
+    },
+    "touch_targets": "Minimum 64px height for all buttons and inputs. Use 'min-h-[64px]'."
+  },
+  "components": {
+    "inputs": {
+      "style": "Massive text inputs. min-h-[64px] text-2xl p-4 rounded-xl border-2 border-border focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/20",
+      "labels": "Explicit labels always visible outside the input. No floating labels."
+    },
+    "buttons": {
+      "primary": "w-full min-h-[72px] bg-brand-primary text-white rounded-2xl flex items-center justify-center gap-4 hover:bg-brand-primary_hover transition-colors shadow-[0_8px_0_#0F3820] active:translate-y-2 active:shadow-[0_0px_0_#0F3820]",
+      "secondary": "w-full min-h-[72px] bg-transparent text-brand-primary border-4 border-brand-primary rounded-2xl flex items-center justify-center gap-4"
+    },
+    "cards": {
+      "style": "bg-white border-2 border-border rounded-3xl p-8 shadow-sm"
+    },
+    "icons": {
+      "library": "lucide-react",
+      "size": "w-10 h-10 or w-12 h-12",
+      "usage": "Every action or category must have an accompanying large icon for visual association."
+    }
+  },
+  "motion": {
+    "philosophy": "No dizzying motion. Simple, clear transitions.",
+    "wizard_transitions": "Fade in and slight slide (e.g., slide from left to right for next, right to left for back in RTL).",
+    "duration": "Moderate (0.3s) so older eyes can follow the change."
+  },
+  "accessibility": {
+    "screen_readers": "Use standard aria-labels.",
+    "testing": "All interactive and key informational elements MUST include a 'data-testid' attribute.",
+    "contrast": "Maintain deep dark text on off-white backgrounds."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.unsplash.com/photo-1721815693498-cc28507c0ba2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjB2aWxsYSUyMGV4dGVyaW9yfGVufDB8fHx8MTc4MjY3MDI2OHww&ixlib=rb-4.1.0&q=85",
+      "category": "hero",
+      "description": "Modern two-story house used for property placeholder or hero landing page section"
+    },
+    {
+      "url": "https://images.pexels.com/photos/34378030/pexels-photo-34378030.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "category": "property_placeholder",
+      "description": "Contemporary villa showcasing sleek architecture for default property images"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "Build out the application using React, Tailwind CSS, and Shadcn UI as necessary.",
+    "Enforce RTL layout universally (dir='rtl' on body, and Tailwind logical properties like ms-, pe-, ps-, me-).",
+    "Font must be Cairo. Use ONLY weights 600, 800, 900. No regular or light text.",
+    "Implement the 'Add Property' feature strictly as a 5-step Wizard. Do not combine steps. One or two huge fields per screen.",
+    "Authentication must support phone or email in one field, password in another field. No OTP implementation required as per constraints.",
+    "Admin Dashboard must display total properties, sold, rented, available, inquiries, latest additions, and subscription statuses.",
+    "Always apply 'data-testid' to buttons, links, inputs, and key text for automated testing.",
+    "Images for properties should use the provided placeholder URLs.",
+    "Do NOT use standard small Shadcn text sizing. Override Shadcn component text sizes to be text-xl minimum."
+  ]
+}
