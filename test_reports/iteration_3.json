@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 3: Subscription overhaul backend testing. 30/30 pytest cases pass (100%). Verified: (a) GET /api/subscriptions/plans returns exactly 3 public plans (monthly=25000, quarterly=65000, yearly=275000, no trial). (b) GET /api/admin/subscriptions/plans is admin-only (401 without auth, 403 for agent), returns 4 plans including trial (amount=0, days=7). (c) POST /api/subscriptions is admin-only — agent gets 403 with 'فقط المدير' in detail; admin can grant any plan (trial ~7d, yearly ~365d, correct amounts) to any user_id; invalid plan → 400; nonexistent user_id → 404. (d) GET /api/subscriptions/status: 401 unauth, admin='active', agent-no-sub='expired' (has_active=false), yearly-agent='active' with days_remaining>7, trial-agent='warning' with days_remaining<=7. (e) POST/PUT /api/properties returns 402 for expired agents with 'انتهى اشتراكك — تواصل معنا للتجديد'; admin and trial-active agent succeed; GET /api/properties still 200 for expired agent. (f) DELETE /api/subscriptions/{id}: 403 non-admin, 200 admin, 404 unknown id. (g) GET /api/admin/users returns list with id/name/email/office_name for admin, 401/403 otherwise. (h) Regression: auth/me, admin/stats, admin/offices, subscriptions/me, property agent scoping all pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_subscription_overhaul.py",
+    "/app/test_reports/pytest/pytest_iter3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "require_active_subscription() runs BEFORE ownership check in PUT /api/properties. Cross-agent PUT by an expired agent returns 402 (payment) instead of 403 (forbidden), which leaks the fact that the caller's sub is expired before the resource check. Consider ordering: authenticate → ownership/existence → subscription gate. Minor security-UX issue, not a blocker.",
+    "get_active_subscription() ignores Subscription.status = 'expired' rows correctly, but _expire_stale() is only invoked on /subscriptions/me and /admin/subscriptions endpoints. Stale rows remain status='active' in DB until someone hits those endpoints. Consider a scheduled job or run _expire_stale on /subscriptions/status too, for consistent admin_stats.expiring_soon counts.",
+    "POST /api/subscriptions allows stacking multiple active subs per user (no dedup / no invalidation of previous active sub). Granting yearly then trial to same user leaves both active; get_active_subscription picks the max end_date, which is fine — but /subscriptions/me shows duplicates and admin_stats.expiring_soon may double-count. Consider marking previous active subs as 'superseded' on new grant.",
+    "SubscriptionStatusResponse.status='expired' is returned when user has NO subscription at all — semantically 'none' would be more accurate. Iteration spec allows this (frontend can treat both the same), but consider distinguishing 'none' vs 'expired' for clearer UX.",
+    "PLAN_PRICING is a module-level dict; PUBLIC_PLAN_KEYS hard-codes exclusions. If a new admin-only plan is added, developer must remember to exclude it from PUBLIC_PLAN_KEYS. Consider a per-plan 'public: bool' flag inside PLAN_PRICING and filter by it, reducing chance of accidentally exposing trial-like plans."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_subscription_overhaul.py"
+  ],
+  "success_rate": {
+    "backend": "100% (30/30)",
+    "frontend": "not tested (out of scope)"
+  },
+  "test_credentials": "admin@aqari.com / admin123",
+  "seed_data_creation": "Session-scoped fixtures register fresh agents with unique uuid-suffixed emails/offices. Admin-created subscriptions are cleaned up in autouse session teardown. Test properties are deleted inline after each mutation test. Residual TEST_ users/offices remain (harmless, uuid-unique per run).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Test file: /app/backend/tests/test_subscription_overhaul.py (30 tests). Prior iteration 2 test file /app/backend/tests/backend_test.py still references yearly=250000 (STALE) and will fail on TestSubscriptions.test_plans. Main agent should either update or delete the old file. Run: cd /app/backend && REACT_APP_BACKEND_URL=... python -m pytest tests/test_subscription_overhaul.py -v. All new endpoints (/subscriptions/status, /admin/subscriptions/plans, /admin/users, DELETE /subscriptions/{id}) work; property 402-gate works; admin bypass works.",
+  "rca of the issue": "N/A. Only in-test issue was email case comparison — registration lowercases emails via `user.email.lower()`. Test was updated to compare .lower() and passes."
+}

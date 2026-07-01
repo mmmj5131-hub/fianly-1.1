@@ -22,6 +22,7 @@ import {
   User,
 } from 'lucide-react';
 import { BottomNav } from '../components/BottomNav';
+import { SubscriptionBanner } from '../components/SubscriptionBanner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -94,6 +95,7 @@ export const PropertyListPage = ({ status, testid }) => {
     <div className="min-h-screen bg-[#F9F6F0] p-4 sm:p-8 pb-28 md:pb-8" dir="rtl" data-testid={testid}>
       {/* Header */}
       <div className="max-w-7xl mx-auto mb-6">
+        <SubscriptionBanner />
         <div className="bg-white border-2 border-[#D2CFC9] rounded-3xl p-4 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
             <Building2 className="w-12 h-12 sm:w-16 sm:h-16 text-[#1A5632] flex-shrink-0" />

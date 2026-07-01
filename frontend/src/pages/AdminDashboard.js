@@ -13,6 +13,8 @@ import {
   AlertTriangle,
   CreditCard,
   Calendar,
+  Gift,
+  Plus,
 } from 'lucide-react';
 import { BottomNav } from '../components/BottomNav';
 
@@ -25,33 +27,78 @@ export const AdminDashboard = () => {
   const [offices, setOffices] = useState([]);
   const [expiringSubs, setExpiringSubs] = useState([]);
   const [allSubs, setAllSubs] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [adminPlans, setAdminPlans] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [assignUserId, setAssignUserId] = useState('');
+  const [assignPlan, setAssignPlan] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [assignMsg, setAssignMsg] = useState('');
+
+  const fetchAll = async () => {
+    try {
+      const [statsRes, officesRes, expiringRes, subsRes, usersRes, plansRes] = await Promise.all([
+        axios.get(`${API}/admin/stats`, { withCredentials: true }),
+        axios.get(`${API}/admin/offices`, { withCredentials: true }),
+        axios.get(`${API}/admin/subscriptions/expiring`, { withCredentials: true }),
+        axios.get(`${API}/admin/subscriptions`, { withCredentials: true }),
+        axios.get(`${API}/admin/users`, { withCredentials: true }),
+        axios.get(`${API}/admin/subscriptions/plans`, { withCredentials: true }),
+      ]);
+      setStats(statsRes.data);
+      setOffices(officesRes.data);
+      setExpiringSubs(expiringRes.data);
+      setAllSubs(subsRes.data);
+      setUsers(usersRes.data);
+      setAdminPlans(plansRes.data);
+    } catch (error) {
+      console.error('Error fetching admin data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (user?.role !== 'admin') {
       navigate('/dashboard');
       return;
     }
-    const fetchData = async () => {
-      try {
-        const [statsRes, officesRes, expiringRes, subsRes] = await Promise.all([
-          axios.get(`${API}/admin/stats`, { withCredentials: true }),
-          axios.get(`${API}/admin/offices`, { withCredentials: true }),
-          axios.get(`${API}/admin/subscriptions/expiring`, { withCredentials: true }),
-          axios.get(`${API}/admin/subscriptions`, { withCredentials: true }),
-        ]);
-        setStats(statsRes.data);
-        setOffices(officesRes.data);
-        setExpiringSubs(expiringRes.data);
-        setAllSubs(subsRes.data);
-      } catch (error) {
-        console.error('Error fetching admin data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
+    fetchAll();
   }, [user, navigate]);
+
+  const handleAssign = async () => {
+    if (!assignUserId || !assignPlan) {
+      setAssignMsg('يرجى اختيار المستخدم والباقة');
+      return;
+    }
+    setAssigning(true);
+    setAssignMsg('');
+    try {
+      await axios.post(
+        `${API}/subscriptions`,
+        { plan_type: assignPlan, user_id: assignUserId },
+        { withCredentials: true }
+      );
+      setAssignMsg('تم تفعيل الاشتراك بنجاح');
+      setAssignUserId('');
+      setAssignPlan('');
+      await fetchAll();
+    } catch (err) {
+      setAssignMsg(err.response?.data?.detail || 'فشل تفعيل الاشتراك');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const handleDeleteSub = async (subId) => {
+    if (!window.confirm('هل تريد حذف هذا الاشتراك؟')) return;
+    try {
+      await axios.delete(`${API}/subscriptions/${subId}`, { withCredentials: true });
+      await fetchAll();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'فشل الحذف');
+    }
+  };
 
   const formatDate = (iso) => {
     const d = new Date(iso);
@@ -215,6 +262,76 @@ export const AdminDashboard = () => {
         </div>
       </div>
 
+      {/* Admin: Grant Subscription (includes Free Trial) */}
+      <div className="max-w-7xl mx-auto mb-8">
+        <div className="bg-white border-2 border-[#D2CFC9] rounded-3xl p-6 sm:p-8">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-[#0A1F13] mb-6 flex items-center gap-3">
+            <Gift className="w-10 h-10 text-[#D95D39]" />
+            تفعيل اشتراك لمكتب
+          </h2>
+          <p className="text-lg font-bold text-[#6B7A70] mb-4">
+            يمكنك تفعيل أي باقة (بما فيها التجربة المجانية) لأي مكتب أو موظف مسجل.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-lg font-black text-[#0A1F13] mb-2">المستخدم / المكتب</label>
+              <select
+                data-testid="admin-assign-user-select"
+                value={assignUserId}
+                onChange={(e) => setAssignUserId(e.target.value)}
+                className="w-full min-h-[56px] text-lg p-3 rounded-xl border-2 border-[#D2CFC9] focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold bg-white"
+              >
+                <option value="">-- اختر مستخدم --</option>
+                {users
+                  .filter((u) => u.role !== 'admin')
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} {u.office_name ? `(${u.office_name})` : ''} — {u.email || u.phone}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-lg font-black text-[#0A1F13] mb-2">الباقة</label>
+              <select
+                data-testid="admin-assign-plan-select"
+                value={assignPlan}
+                onChange={(e) => setAssignPlan(e.target.value)}
+                className="w-full min-h-[56px] text-lg p-3 rounded-xl border-2 border-[#D2CFC9] focus:border-[#1A5632] focus:ring-4 focus:ring-[#1A5632]/20 outline-none font-semibold bg-white"
+              >
+                <option value="">-- اختر باقة --</option>
+                {adminPlans.map((p) => (
+                  <option key={p.plan_type} value={p.plan_type}>
+                    {p.label} — {p.amount.toLocaleString('ar-EG')} د.ع — {p.days} يوم
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-end">
+              <button
+                data-testid="admin-assign-submit"
+                onClick={handleAssign}
+                disabled={assigning}
+                className="w-full min-h-[56px] bg-[#1A5632] text-white rounded-2xl flex items-center justify-center gap-3 hover:bg-[#0F3820] transition-colors shadow-[0_6px_0_#0F3820] active:translate-y-1 active:shadow-[0_0px_0_#0F3820] text-xl font-black disabled:opacity-50"
+              >
+                <Plus className="w-7 h-7" />
+                {assigning ? 'جاري التفعيل...' : 'تفعيل الاشتراك'}
+              </button>
+            </div>
+          </div>
+          {assignMsg && (
+            <p
+              data-testid="admin-assign-message"
+              className={`mt-4 text-lg font-bold ${
+                assignMsg.includes('نجاح') ? 'text-green-700' : 'text-red-700'
+              }`}
+            >
+              {assignMsg}
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* All Subscriptions */}
       <div className="max-w-7xl mx-auto mb-8">
         <h2 className="text-3xl sm:text-4xl font-extrabold text-[#0A1F13] mb-6 flex items-center gap-3">
@@ -241,24 +358,37 @@ export const AdminDashboard = () => {
                       {sub.plan_type === 'monthly'
                         ? 'شهري'
                         : sub.plan_type === 'quarterly'
-                        ? 'ثلاثة أشهر'
-                        : 'سنوي'}
+                        ? 'ربع سنوي'
+                        : sub.plan_type === 'yearly'
+                        ? 'سنوي'
+                        : sub.plan_type === 'trial'
+                        ? 'تجربة مجانية'
+                        : sub.plan_type}
                     </p>
                   </div>
                 </div>
-                <div className="text-left">
-                  <p className="text-lg font-black text-[#0A1F13]">
-                    {sub.amount.toLocaleString('ar-EG')} د.ع
-                  </p>
-                  <span
-                    className={`inline-block px-3 py-1 rounded-xl text-base font-bold ${
-                      sub.status === 'active'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-gray-200 text-gray-700'
-                    }`}
+                <div className="flex items-center gap-3 text-left">
+                  <div>
+                    <p className="text-lg font-black text-[#0A1F13]">
+                      {sub.amount.toLocaleString('ar-EG')} د.ع
+                    </p>
+                    <span
+                      className={`inline-block px-3 py-1 rounded-xl text-base font-bold ${
+                        sub.status === 'active'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-gray-200 text-gray-700'
+                      }`}
+                    >
+                      {sub.status === 'active' ? 'فعال' : 'منتهي'}
+                    </span>
+                  </div>
+                  <button
+                    data-testid={`admin-delete-sub-${sub.id}`}
+                    onClick={() => handleDeleteSub(sub.id)}
+                    className="min-h-[44px] px-3 bg-red-600 text-white rounded-xl text-sm font-black hover:bg-red-700"
                   >
-                    {sub.status === 'active' ? 'فعال' : 'منتهي'}
-                  </span>
+                    حذف
+                  </button>
                 </div>
               </div>
             ))}

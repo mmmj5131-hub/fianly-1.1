@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { CreditCard, Calendar, CheckCircle, AlertTriangle, ArrowRight, Star, Crown, Gem } from 'lucide-react';
+import { CreditCard, Calendar, CheckCircle, ArrowRight, Star, Crown, Gem, MessageCircle } from 'lucide-react';
 import { BottomNav } from '../components/BottomNav';
+import { SubscriptionBanner } from '../components/SubscriptionBanner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const WHATSAPP_BASE = 'https://wa.me/7760307768';
 
 const PLAN_ICONS = {
   monthly: Star,
@@ -18,49 +20,35 @@ const PLAN_COLORS = {
   yearly: 'bg-amber-50 border-amber-400',
 };
 
+const buildWhatsAppUrl = (planLabel) => {
+  const message = `اود بتجديد الاشتراك باقة ${planLabel}`;
+  return `${WHATSAPP_BASE}?text=${encodeURIComponent(message)}`;
+};
+
 export const Subscriptions = () => {
   const navigate = useNavigate();
   const [plans, setPlans] = useState([]);
   const [mySubs, setMySubs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [subscribing, setSubscribing] = useState('');
   const [error, setError] = useState('');
 
-  const fetchData = async () => {
-    try {
-      const [plansRes, subsRes] = await Promise.all([
-        axios.get(`${API}/subscriptions/plans`, { withCredentials: true }),
-        axios.get(`${API}/subscriptions/me`, { withCredentials: true }),
-      ]);
-      setPlans(plansRes.data);
-      setMySubs(subsRes.data);
-    } catch (err) {
-      setError(err.response?.data?.detail || 'تعذر تحميل البيانات');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [plansRes, subsRes] = await Promise.all([
+          axios.get(`${API}/subscriptions/plans`, { withCredentials: true }),
+          axios.get(`${API}/subscriptions/me`, { withCredentials: true }),
+        ]);
+        setPlans(plansRes.data);
+        setMySubs(subsRes.data);
+      } catch (err) {
+        setError(err.response?.data?.detail || 'تعذر تحميل البيانات');
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchData();
   }, []);
-
-  const handleSubscribe = async (planType) => {
-    setSubscribing(planType);
-    setError('');
-    try {
-      await axios.post(
-        `${API}/subscriptions`,
-        { plan_type: planType },
-        { withCredentials: true }
-      );
-      await fetchData();
-    } catch (err) {
-      setError(err.response?.data?.detail || 'فشل إنشاء الاشتراك');
-    } finally {
-      setSubscribing('');
-    }
-  };
 
   const formatDate = (iso) => {
     const d = new Date(iso);
@@ -70,15 +58,24 @@ export const Subscriptions = () => {
   const daysLeft = (iso) => {
     const d = new Date(iso);
     const now = new Date();
-    const diff = Math.ceil((d - now) / (1000 * 60 * 60 * 24));
-    return diff;
+    return Math.ceil((d - now) / (1000 * 60 * 60 * 24));
   };
 
   const activeSub = mySubs.find((s) => s.status === 'active');
 
+  const planLabelFor = (type) => {
+    if (type === 'monthly') return 'شهري';
+    if (type === 'quarterly') return 'ربع سنوي';
+    if (type === 'yearly') return 'سنوي';
+    if (type === 'trial') return 'تجربة مجانية';
+    return type;
+  };
+
   return (
     <div className="min-h-screen bg-[#F9F6F0] p-4 sm:p-8 pb-28 md:pb-8" dir="rtl" data-testid="subscriptions-page">
       <div className="max-w-5xl mx-auto">
+        <SubscriptionBanner />
+
         {/* Header */}
         <div className="bg-white border-2 border-[#D2CFC9] rounded-3xl p-6 mb-6 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">
@@ -106,9 +103,7 @@ export const Subscriptions = () => {
           <div className="mb-8 bg-green-50 border-4 border-green-500 rounded-3xl p-6">
             <div className="flex items-center gap-4 mb-3">
               <CheckCircle className="w-12 h-12 text-green-600" />
-              <h3 className="text-2xl sm:text-3xl font-black text-green-800">
-                لديك اشتراك فعال
-              </h3>
+              <h3 className="text-2xl sm:text-3xl font-black text-green-800">لديك اشتراك فعال</h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
               <div>
@@ -127,40 +122,38 @@ export const Subscriptions = () => {
                 </p>
               </div>
               <div>
-                <p className="text-lg font-bold text-[#2B4736]">المبلغ المدفوع</p>
-                <p className="text-xl font-black text-[#0A1F13]">
-                  {activeSub.amount.toLocaleString('ar-EG')} دينار
-                </p>
+                <p className="text-lg font-bold text-[#2B4736]">الباقة</p>
+                <p className="text-xl font-black text-[#0A1F13]">{planLabelFor(activeSub.plan_type)}</p>
               </div>
             </div>
-            {daysLeft(activeSub.end_date) <= 7 && (
-              <div className="mt-4 p-4 bg-yellow-100 border-2 border-yellow-500 rounded-2xl flex items-center gap-3">
-                <AlertTriangle className="w-8 h-8 text-yellow-700" />
-                <p className="text-xl font-extrabold text-yellow-800">
-                  ينتهي اشتراكك قريباً! يرجى التجديد.
-                </p>
-              </div>
-            )}
           </div>
         )}
 
-        {/* Plans */}
-        <h2 className="text-3xl sm:text-4xl font-black text-[#0A1F13] mb-6">اختر خطة الاشتراك</h2>
+        {/* Plans - contact via WhatsApp */}
+        <h2 className="text-3xl sm:text-4xl font-black text-[#0A1F13] mb-2">اختر خطة الاشتراك</h2>
+        <p className="text-lg sm:text-xl font-bold text-[#2B4736] mb-6">
+          اضغط على الباقة المطلوبة وسنتواصل معك عبر واتساب
+        </p>
+
         {loading ? (
           <p className="text-2xl font-bold text-[#2B4736]">جاري التحميل...</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
             {plans.map((plan) => {
-              const Icon = PLAN_ICONS[plan.plan_type];
+              const Icon = PLAN_ICONS[plan.plan_type] || Star;
+              const label = plan.label || planLabelFor(plan.plan_type);
               return (
-                <div
+                <a
                   key={plan.plan_type}
+                  href={buildWhatsAppUrl(label)}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   data-testid={`plan-${plan.plan_type}`}
-                  className={`${PLAN_COLORS[plan.plan_type]} border-4 rounded-3xl p-8 shadow-sm flex flex-col`}
+                  className={`${PLAN_COLORS[plan.plan_type] || 'bg-white border-[#D2CFC9]'} border-4 rounded-3xl p-8 shadow-sm flex flex-col hover:shadow-lg hover:-translate-y-1 transition-all cursor-pointer`}
                 >
                   <div className="flex items-center gap-3 mb-4">
                     <Icon className="w-12 h-12 text-[#D95D39]" />
-                    <h3 className="text-2xl font-black text-[#0A1F13]">{plan.label}</h3>
+                    <h3 className="text-2xl font-black text-[#0A1F13]">{label}</h3>
                   </div>
                   <div className="my-6 flex-1">
                     <p className="text-5xl font-black text-[#0A1F13]">
@@ -174,15 +167,14 @@ export const Subscriptions = () => {
                       <span>{plan.days} يوم</span>
                     </div>
                   </div>
-                  <button
-                    data-testid={`subscribe-${plan.plan_type}`}
-                    onClick={() => handleSubscribe(plan.plan_type)}
-                    disabled={subscribing === plan.plan_type}
-                    className="w-full min-h-[64px] bg-[#1A5632] text-white rounded-2xl flex items-center justify-center gap-3 hover:bg-[#0F3820] transition-colors shadow-[0_6px_0_#0F3820] active:translate-y-1 active:shadow-[0_0px_0_#0F3820] text-xl font-black disabled:opacity-50"
+                  <div
+                    data-testid={`plan-cta-${plan.plan_type}`}
+                    className="w-full min-h-[64px] bg-[#25D366] text-white rounded-2xl flex items-center justify-center gap-3 hover:bg-[#128C7E] transition-colors shadow-[0_6px_0_#128C7E] text-xl font-black"
                   >
-                    {subscribing === plan.plan_type ? 'جاري الاشتراك...' : 'اشترك الآن'}
-                  </button>
-                </div>
+                    <MessageCircle className="w-7 h-7" />
+                    اشترك عبر واتساب
+                  </div>
+                </a>
               );
             })}
           </div>
@@ -204,13 +196,7 @@ export const Subscriptions = () => {
                 <div className="flex items-center gap-4">
                   <Calendar className="w-10 h-10 text-[#1A5632]" />
                   <div>
-                    <p className="text-xl font-extrabold text-[#0A1F13]">
-                      {sub.plan_type === 'monthly'
-                        ? 'اشتراك شهري'
-                        : sub.plan_type === 'quarterly'
-                        ? 'اشتراك ثلاثة أشهر'
-                        : 'اشتراك سنوي'}
-                    </p>
+                    <p className="text-xl font-extrabold text-[#0A1F13]">{planLabelFor(sub.plan_type)}</p>
                     <p className="text-lg font-bold text-[#6B7A70]">
                       من {formatDate(sub.start_date)} إلى {formatDate(sub.end_date)}
                     </p>

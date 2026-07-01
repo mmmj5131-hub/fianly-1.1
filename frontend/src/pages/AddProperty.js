@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import { PROPERTY } from '../constants/testIds';
-import { ChevronLeft, ChevronRight, Home, DollarSign, Ruler, BedDouble, Upload, Phone, User, MapPin } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Home, DollarSign, Ruler, BedDouble, Upload, Phone, User, MapPin, XCircle, MessageCircle } from 'lucide-react';
+import { useSubscriptionStatus, SubscriptionBanner } from '../components/SubscriptionBanner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -19,6 +20,7 @@ const STEPS = [
 export const AddProperty = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { status: subStatus } = useSubscriptionStatus();
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -396,7 +398,36 @@ export const AddProperty = () => {
   return (
     <div className="min-h-screen bg-[#F9F6F0] p-4 sm:p-8" dir="rtl">
       <div className="max-w-2xl mx-auto">
-        {/* Progress Bar */}
+        <SubscriptionBanner />
+        {user && user.role !== 'admin' && subStatus && subStatus.status === 'expired' ? (
+          <div
+            data-testid="add-property-blocked"
+            className="bg-white border-4 border-red-500 rounded-3xl p-8 sm:p-12 text-center"
+          >
+            <XCircle className="w-24 h-24 text-red-600 mx-auto mb-6" />
+            <h2 className="text-3xl font-black text-red-800 mb-4">لا يمكنك إضافة عقارات</h2>
+            <p className="text-xl font-bold text-[#2B4736] mb-6">
+              انتهى اشتراكك — تواصل معنا للتجديد للاستمرار بإضافة العقارات
+            </p>
+            <a
+              href={`https://wa.me/7760307768?text=${encodeURIComponent('اود بتجديد الاشتراك')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-3 min-h-[64px] px-8 bg-[#25D366] text-white rounded-2xl text-xl font-black hover:bg-[#128C7E] transition-colors"
+            >
+              <MessageCircle className="w-8 h-8" />
+              اشترك عبر واتساب
+            </a>
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="block mx-auto mt-6 text-xl font-bold text-[#1A5632] hover:text-[#0F3820] underline"
+            >
+              العودة للوحة الرئيسية
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Progress Bar */}
         <div className="mb-8">
           <div className="flex justify-between mb-4">
             {STEPS.map((step, idx) => (
@@ -463,6 +494,8 @@ export const AddProperty = () => {
             إلغاء والعودة
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

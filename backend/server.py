@@ -185,6 +185,15 @@ class PropertyResponse(BaseModel):
 
 class SubscriptionPlan(BaseModel):
     plan_type: str
+    user_id: Optional[str] = None  # admin can assign to any user; if omitted, defaults to admin themselves
+
+
+class SubscriptionStatusResponse(BaseModel):
+    has_active: bool
+    days_remaining: Optional[int] = None
+    end_date: Optional[str] = None
+    plan_type: Optional[str] = None
+    status: str  # "active", "warning" (<=7d), "expired", "none"
 
 
 class SubscriptionResponse(BaseModel):
@@ -211,10 +220,14 @@ class AdminStats(BaseModel):
 
 
 PLAN_PRICING = {
-    "monthly": {"amount": 25000, "days": 30, "label": "اشتراك شهري"},
-    "quarterly": {"amount": 65000, "days": 90, "label": "اشتراك ثلاثة أشهر"},
-    "yearly": {"amount": 250000, "days": 365, "label": "اشتراك سنوي"},
+    "monthly": {"amount": 25000, "days": 30, "label": "شهري"},
+    "quarterly": {"amount": 65000, "days": 90, "label": "ربع سنوي"},
+    "yearly": {"amount": 275000, "days": 365, "label": "سنوي"},
+    "trial": {"amount": 0, "days": 7, "label": "تجربة مجانية - 7 أيام"},
 }
+
+# Plans exposed to non-admin offices (excludes trial)
+PUBLIC_PLAN_KEYS = ["monthly", "quarterly", "yearly"]
 
 
 # ---------- Serializers ----------
@@ -376,11 +389,21 @@ async def logout(response: Response):
     return {"message": "تم تسجيل الخروج بنجاح"}
 
 
+async def require_active_subscription(user: User, db: AsyncSession):
+    """Block property mutation for agents with expired subscription. Admins bypass."""
+    if user.role == "admin":
+        return
+    sub = await get_active_subscription(user.id, db)
+    if not sub:
+        raise HTTPException(status_code=402, detail="انتهى اشتراكك — تواصل معنا للتجديد")
+
+
 # ---------- Properties ----------
 @api_router.post("/properties", response_model=PropertyResponse)
 async def create_property(data: PropertyCreate,
                           current_user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
+    await require_active_subscription(current_user, db)
     prop = Property(
         id=str(uuid.uuid4()),
         **data.model_dump(),
@@ -480,6 +503,7 @@ async def get_property(property_id: str,
 async def update_property(property_id: str, data: PropertyCreate,
                           current_user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
+    await require_active_subscription(current_user, db)
     result = await db.execute(select(Property).where(Property.id == property_id))
     prop = result.scalar_one_or_none()
     if not prop:
@@ -573,33 +597,82 @@ async def get_admin_stats(current_user: User = Depends(get_current_user),
 
 
 # ---------- Subscriptions ----------
+async def get_active_subscription(user_id: str, db: AsyncSession) -> Optional[Subscription]:
+    """Return the most-recent active subscription (end_date in future) for a user, or None."""
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(Subscription).where(and_(
+            Subscription.user_id == user_id,
+            Subscription.status == "active",
+            Subscription.end_date >= now,
+        )).order_by(Subscription.end_date.desc()).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 @api_router.get("/subscriptions/plans")
 async def get_subscription_plans():
+    # Public plans exclude "trial" (admin-only)
     return [
-        {"plan_type": k, "amount": v["amount"], "label": v["label"], "days": v["days"], "currency": "IQD"}
-        for k, v in PLAN_PRICING.items()
+        {"plan_type": k, "amount": PLAN_PRICING[k]["amount"],
+         "label": PLAN_PRICING[k]["label"], "days": PLAN_PRICING[k]["days"], "currency": "IQD"}
+        for k in PUBLIC_PLAN_KEYS
     ]
+
+
+@api_router.get("/subscriptions/status", response_model=SubscriptionStatusResponse)
+async def get_my_subscription_status(current_user: User = Depends(get_current_user),
+                                     db: AsyncSession = Depends(get_db)):
+    # Admin is always considered "active"
+    if current_user.role == "admin":
+        return SubscriptionStatusResponse(has_active=True, status="active")
+    sub = await get_active_subscription(current_user.id, db)
+    if not sub:
+        return SubscriptionStatusResponse(has_active=False, status="expired")
+    now = datetime.now(timezone.utc)
+    days_remaining = max(0, (sub.end_date - now).days)
+    if days_remaining <= 7:
+        state = "warning"
+    else:
+        state = "active"
+    return SubscriptionStatusResponse(
+        has_active=True,
+        days_remaining=days_remaining,
+        end_date=sub.end_date.isoformat(),
+        plan_type=sub.plan_type,
+        status=state,
+    )
 
 
 @api_router.post("/subscriptions", response_model=SubscriptionResponse)
 async def create_subscription(data: SubscriptionPlan,
                               current_user: User = Depends(get_current_user),
                               db: AsyncSession = Depends(get_db)):
+    # ADMIN-ONLY: agents cannot self-activate
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="غير مصرح - فقط المدير يمكنه إنشاء الاشتراكات")
     if data.plan_type not in PLAN_PRICING:
         raise HTTPException(status_code=400, detail="نوع الاشتراك غير صحيح")
+
+    target_user_id = data.user_id or current_user.id
+    target_result = await db.execute(select(User).where(User.id == target_user_id))
+    target_user = target_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+
+    office_name = None
+    if target_user.office_id:
+        r = await db.execute(select(Office).where(Office.id == target_user.office_id))
+        o = r.scalar_one_or_none()
+        office_name = o.office_name if o else None
+
     plan = PLAN_PRICING[data.plan_type]
     now = datetime.now(timezone.utc)
     end_date = now + timedelta(days=plan["days"])
 
-    office_name = None
-    if current_user.office_id:
-        result = await db.execute(select(Office).where(Office.id == current_user.office_id))
-        office = result.scalar_one_or_none()
-        office_name = office.office_name if office else None
-
     sub = Subscription(
         id=str(uuid.uuid4()),
-        user_id=current_user.id, user_name=current_user.name,
+        user_id=target_user.id, user_name=target_user.name,
         office_name=office_name,
         plan_type=data.plan_type, amount=plan["amount"], currency="IQD",
         start_date=now, end_date=end_date, status="active",
@@ -609,6 +682,21 @@ async def create_subscription(data: SubscriptionPlan,
     await db.commit()
     await db.refresh(sub)
     return sub_to_response(sub)
+
+
+@api_router.delete("/subscriptions/{sub_id}")
+async def delete_subscription(sub_id: str,
+                              current_user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="غير مصرح - فقط المدير")
+    result = await db.execute(select(Subscription).where(Subscription.id == sub_id))
+    sub = result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="الاشتراك غير موجود")
+    await db.delete(sub)
+    await db.commit()
+    return {"message": "تم حذف الاشتراك"}
 
 
 async def _expire_stale(subs: list, db: AsyncSession):
@@ -657,6 +745,39 @@ async def get_expiring_subscriptions(current_user: User = Depends(get_current_us
         )).order_by(Subscription.end_date.asc()).limit(100)
     )
     return [sub_to_response(s) for s in result.scalars().all()]
+
+
+@api_router.get("/admin/subscriptions/plans")
+async def get_admin_subscription_plans(current_user: User = Depends(get_current_user)):
+    """Admin-only plans list - includes trial."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="غير مصرح - للمديرين فقط")
+    return [
+        {"plan_type": k, "amount": v["amount"], "label": v["label"], "days": v["days"], "currency": "IQD"}
+        for k, v in PLAN_PRICING.items()
+    ]
+
+
+@api_router.get("/admin/users")
+async def get_all_users(current_user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    """Admin-only: list all users (with office name) for subscription assignment."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="غير مصرح - للمديرين فقط")
+    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    users = result.scalars().all()
+    output = []
+    for u in users:
+        office_name = None
+        if u.office_id:
+            r = await db.execute(select(Office).where(Office.id == u.office_id))
+            o = r.scalar_one_or_none()
+            office_name = o.office_name if o else None
+        output.append({
+            "id": u.id, "name": u.name, "email": u.email, "phone": u.phone,
+            "role": u.role, "office_name": office_name,
+        })
+    return output
 
 
 @api_router.get("/admin/offices")

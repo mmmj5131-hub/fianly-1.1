@@ -1,7 +1,7 @@
 import React from 'react';
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "./contexts/AuthContext";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthPage } from "./pages/AuthPage";
 import { Dashboard, SoldProperties, RentedProperties } from "./pages/Dashboard";
@@ -10,6 +10,15 @@ import { AdminDashboard } from "./pages/AdminDashboard";
 import { PropertyDetails } from "./pages/PropertyDetails";
 import { EditProperty } from "./pages/EditProperty";
 import { Subscriptions } from "./pages/Subscriptions";
+import { ContactFooter } from "./components/ContactFooter";
+
+function GlobalFooter() {
+  const location = useLocation();
+  const { user } = useAuth();
+  // Hide footer on auth page
+  if (!user || location.pathname === '/auth') return null;
+  return <ContactFooter />;
+}
 
 function App() {
   return (
@@ -84,6 +93,7 @@ function App() {
             />
             <Route path="/" element={<Navigate to="/auth" replace />} />
           </Routes>
+          <GlobalFooter />
         </BrowserRouter>
       </AuthProvider>
     </div>
