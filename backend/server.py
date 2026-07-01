@@ -670,6 +670,16 @@ async def create_subscription(data: SubscriptionPlan,
     now = datetime.now(timezone.utc)
     end_date = now + timedelta(days=plan["days"])
 
+    # Mark all previously active subs for this user as 'superseded'
+    prev_result = await db.execute(
+        select(Subscription).where(and_(
+            Subscription.user_id == target_user.id,
+            Subscription.status == "active",
+        ))
+    )
+    for prev in prev_result.scalars().all():
+        prev.status = "superseded"
+
     sub = Subscription(
         id=str(uuid.uuid4()),
         user_id=target_user.id, user_name=target_user.name,

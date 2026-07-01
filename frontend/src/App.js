@@ -11,13 +11,19 @@ import { PropertyDetails } from "./pages/PropertyDetails";
 import { EditProperty } from "./pages/EditProperty";
 import { Subscriptions } from "./pages/Subscriptions";
 import { ContactFooter } from "./components/ContactFooter";
+import { SubscriptionNudgeModal } from "./components/SubscriptionBanner";
 
 function GlobalFooter() {
   const location = useLocation();
   const { user } = useAuth();
   // Hide footer on auth page
   if (!user || location.pathname === '/auth') return null;
-  return <ContactFooter />;
+  return (
+    <>
+      <SubscriptionNudgeModal />
+      <ContactFooter />
+    </>
+  );
 }
 
 function App() {

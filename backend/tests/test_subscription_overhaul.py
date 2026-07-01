@@ -369,3 +369,158 @@ class TestRegression:
             assert pid in ids
         finally:
             s.delete(f"{API}/properties/{pid}")
+
+
+
+# ---------- 9. Iteration 4: Supersede-on-grant logic ----------
+class TestSupersedeOnGrant:
+    """When admin POSTs /api/subscriptions for a user with an existing active sub,
+    the previous active sub(s) must become status='superseded' before insertion."""
+
+    def test_first_ever_grant_no_supersede(self, admin_session):
+        """Regression: creating the first sub for a user works (no rows to supersede)."""
+        _, _, uid = _register_agent("TEST_sup_first")
+        r = admin_session.post(f"{API}/subscriptions",
+                               json={"plan_type": "monthly", "user_id": uid})
+        assert r.status_code == 200, r.text
+        sid = r.json()["id"]
+        _CREATED_SUB_IDS.append(sid)
+        assert r.json()["status"] == "active"
+
+    def test_second_grant_marks_prev_superseded(self, admin_session):
+        """Grant A(monthly) then B(yearly): A→'superseded', B→'active'."""
+        agent_s, _, uid = _register_agent("TEST_sup_second")
+
+        # Grant A monthly
+        rA = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "monthly", "user_id": uid})
+        assert rA.status_code == 200
+        subA_id = rA.json()["id"]
+        _CREATED_SUB_IDS.append(subA_id)
+        assert rA.json()["status"] == "active"
+
+        # Grant B yearly — should supersede A
+        rB = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "yearly", "user_id": uid})
+        assert rB.status_code == 200
+        subB_id = rB.json()["id"]
+        _CREATED_SUB_IDS.append(subB_id)
+        assert rB.json()["status"] == "active"
+        assert rB.json()["plan_type"] == "yearly"
+
+        # GET /subscriptions/me — should show both, exactly one active
+        meR = agent_s.get(f"{API}/subscriptions/me")
+        assert meR.status_code == 200
+        subs = meR.json()
+        assert len(subs) == 2, f"Expected 2 subs, got {len(subs)}: {subs}"
+        by_id = {s["id"]: s for s in subs}
+        assert by_id[subA_id]["status"] == "superseded", \
+            f"A must be superseded, was {by_id[subA_id]['status']}"
+        assert by_id[subB_id]["status"] == "active", \
+            f"B must be active, was {by_id[subB_id]['status']}"
+
+        # GET /subscriptions/status — should return NEW sub's plan (yearly) & its end_date
+        st = agent_s.get(f"{API}/subscriptions/status")
+        assert st.status_code == 200
+        d = st.json()
+        assert d["has_active"] is True
+        assert d["plan_type"] == "yearly"
+        assert d["end_date"] == rB.json()["end_date"]
+
+    def test_chained_grants_A_B_C(self, admin_session):
+        """A(monthly)→B(yearly)→C(trial): A stays superseded, B becomes superseded, C active."""
+        agent_s, _, uid = _register_agent("TEST_sup_chain")
+
+        rA = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "monthly", "user_id": uid})
+        assert rA.status_code == 200
+        subA_id = rA.json()["id"]; _CREATED_SUB_IDS.append(subA_id)
+
+        rB = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "yearly", "user_id": uid})
+        assert rB.status_code == 200
+        subB_id = rB.json()["id"]; _CREATED_SUB_IDS.append(subB_id)
+
+        rC = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "trial", "user_id": uid})
+        assert rC.status_code == 200
+        subC_id = rC.json()["id"]; _CREATED_SUB_IDS.append(subC_id)
+
+        meR = agent_s.get(f"{API}/subscriptions/me")
+        assert meR.status_code == 200
+        subs = meR.json()
+        assert len(subs) == 3
+        by_id = {s["id"]: s["status"] for s in subs}
+        assert by_id[subA_id] == "superseded", f"A should be superseded, got {by_id[subA_id]}"
+        assert by_id[subB_id] == "superseded", f"B should be superseded, got {by_id[subB_id]}"
+        assert by_id[subC_id] == "active", f"C should be active, got {by_id[subC_id]}"
+
+        # Only ONE active at a time
+        active_count = sum(1 for s in subs if s["status"] == "active")
+        assert active_count == 1, f"Must have exactly one active sub, got {active_count}"
+
+        # Status endpoint reflects trial (C) — the only active
+        st = agent_s.get(f"{API}/subscriptions/status")
+        assert st.status_code == 200
+        d = st.json()
+        assert d["has_active"] is True
+        assert d["plan_type"] == "trial"
+        assert d["end_date"] == rC.json()["end_date"]
+
+    def test_superseded_does_not_count_as_active(self, admin_session):
+        """Superseded subs must NOT drive has_active or /status behavior."""
+        agent_s, _, uid = _register_agent("TEST_sup_active_only")
+
+        # Grant yearly then trial. Yearly gets superseded but has later end_date.
+        # Status should use trial (the only ACTIVE), not the superseded yearly.
+        rY = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "yearly", "user_id": uid})
+        assert rY.status_code == 200
+        _CREATED_SUB_IDS.append(rY.json()["id"])
+        yearly_end = rY.json()["end_date"]
+
+        rT = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "trial", "user_id": uid})
+        assert rT.status_code == 200
+        _CREATED_SUB_IDS.append(rT.json()["id"])
+        trial_end = rT.json()["end_date"]
+
+        st = agent_s.get(f"{API}/subscriptions/status")
+        d = st.json()
+        assert d["has_active"] is True
+        assert d["plan_type"] == "trial", \
+            f"status must reflect only active sub (trial), got {d['plan_type']}"
+        assert d["end_date"] == trial_end
+        assert d["end_date"] != yearly_end
+        # Trial gives warning since days_remaining <= 7
+        assert d["status"] == "warning"
+        assert d["days_remaining"] <= 7
+
+    def test_nonexistent_user_still_404_and_no_supersede_side_effect(self, admin_session):
+        """Regression: grant to invalid user_id returns 404 without touching anyone else."""
+        r = admin_session.post(f"{API}/subscriptions",
+                               json={"plan_type": "monthly",
+                                     "user_id": str(uuid.uuid4())})
+        assert r.status_code == 404
+
+    def test_non_admin_still_blocked_403(self, fresh_agent):
+        """Regression: non-admin cannot POST /subscriptions."""
+        s, _, _ = fresh_agent
+        r = s.post(f"{API}/subscriptions", json={"plan_type": "monthly"})
+        assert r.status_code == 403
+
+    def test_delete_active_after_supersede(self, admin_session):
+        """Regression: DELETE still works after supersede chain."""
+        _, _, uid = _register_agent("TEST_sup_delete")
+        rA = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "monthly", "user_id": uid})
+        subA_id = rA.json()["id"]; _CREATED_SUB_IDS.append(subA_id)
+        rB = admin_session.post(f"{API}/subscriptions",
+                                json={"plan_type": "yearly", "user_id": uid})
+        subB_id = rB.json()["id"]
+
+        dR = admin_session.delete(f"{API}/subscriptions/{subB_id}")
+        assert dR.status_code == 200
+        # Second delete → 404
+        dR2 = admin_session.delete(f"{API}/subscriptions/{subB_id}")
+        assert dR2.status_code == 404
